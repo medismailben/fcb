@@ -425,6 +425,14 @@ const char *Breakpoint::GetConditionText() const {
   return m_options_up->GetConditionText();
 }
 
+void Breakpoint::SetInjectCondition(bool inject_condition) {
+  m_options_up->SetInjectCondition(inject_condition);
+}
+
+bool Breakpoint::GetInjectCondition() const {
+  return m_options_up->GetInjectCondition();
+}
+
 // This function is used when "baton" doesn't need to be freed
 void Breakpoint::SetCallback(BreakpointHitCallback callback, void *baton,
                              bool is_synchronous) {
