@@ -83,6 +83,7 @@ add_lldb_library(lldbTarget
     lldbUtility
     lldbPluginExpressionParserClang
     lldbPluginProcessUtility
+    lldbPluginObjectFileTrampoline
 
   LINK_COMPONENTS
     Support
