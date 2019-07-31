@@ -83,7 +83,8 @@ protected:
 
   bool PrepareToExecuteJITExpression(DiagnosticManager &diagnostic_manager,
                                      ExecutionContext &exe_ctx,
-                                     lldb::addr_t &struct_address);
+                                     lldb::addr_t &struct_address,
+                                     const EvaluateExpressionOptions options);
 
   virtual bool AddArguments(ExecutionContext &exe_ctx,
                             std::vector<lldb::addr_t> &args,

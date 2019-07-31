@@ -285,6 +285,7 @@ public:
 
 protected:
   friend class BreakpointSite;
+  friend class BreakpointInjectedSite;
   friend class BreakpointLocationList;
   friend class Process;
   friend class StopInfoBreakpoint;
