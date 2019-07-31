@@ -78,9 +78,11 @@ LLVMUserExpression::DoExecute(DiagnosticManager &diagnostic_manager,
   }
 
   lldb::addr_t struct_address = LLDB_INVALID_ADDRESS;
+  lldb::addr_t function_stack_bottom = LLDB_INVALID_ADDRESS;
+  lldb::addr_t function_stack_top = LLDB_INVALID_ADDRESS;
 
   if (!PrepareToExecuteJITExpression(diagnostic_manager, exe_ctx,
-                                     struct_address)) {
+                                     struct_address, options)) {
     diagnostic_manager.Printf(
         eDiagnosticSeverityError,
         "errored out in %s, couldn't PrepareToExecuteJITExpression",
@@ -88,10 +90,7 @@ LLVMUserExpression::DoExecute(DiagnosticManager &diagnostic_manager,
     return lldb::eExpressionSetupError;
   }
 
-  lldb::addr_t function_stack_bottom = LLDB_INVALID_ADDRESS;
-  lldb::addr_t function_stack_top = LLDB_INVALID_ADDRESS;
-
-  if (m_can_interpret) {
+  if (m_can_interpret && !options.GetInjectCondition()) {
     llvm::Module *module = m_execution_unit_sp->GetModule();
     llvm::Function *function = m_execution_unit_sp->GetFunction();
 
@@ -250,6 +249,7 @@ LLVMUserExpression::DoExecute(DiagnosticManager &diagnostic_manager,
     return lldb::eExpressionResultUnavailable;
   }
 }
+  
 
 bool LLVMUserExpression::FinalizeJITExecution(
     DiagnosticManager &diagnostic_manager, ExecutionContext &exe_ctx,
@@ -292,7 +292,7 @@ bool LLVMUserExpression::FinalizeJITExecution(
 
 bool LLVMUserExpression::PrepareToExecuteJITExpression(
     DiagnosticManager &diagnostic_manager, ExecutionContext &exe_ctx,
-    lldb::addr_t &struct_address) {
+    lldb::addr_t &struct_address, const EvaluateExpressionOptions options) {
   lldb::TargetSP target;
   lldb::ProcessSP process;
   lldb::StackFrameSP frame;
@@ -309,8 +309,9 @@ bool LLVMUserExpression::PrepareToExecuteJITExpression(
       Status alloc_error;
 
       IRMemoryMap::AllocationPolicy policy =
-          m_can_interpret ? IRMemoryMap::eAllocationPolicyHostOnly
-                          : IRMemoryMap::eAllocationPolicyMirror;
+          m_can_interpret && !options.GetInjectCondition()
+              ? IRMemoryMap::eAllocationPolicyHostOnly
+              : IRMemoryMap::eAllocationPolicyMirror;
 
       const bool zero_memory = false;
 

@@ -3969,7 +3969,7 @@ Status ProcessGDBRemote::SendEventData(const char *data) {
   return error;
 }
 
-DataExtractor ProcessGDBRemote::GetAuxvData() {
+lldb_private::DataExtractor ProcessGDBRemote::GetAuxvData() {
   DataBufferSP buf;
   if (m_gdb_comm.GetQXferAuxvReadSupported()) {
     std::string response_string;
@@ -3979,7 +3979,7 @@ DataExtractor ProcessGDBRemote::GetAuxvData() {
       buf = std::make_shared<DataBufferHeap>(response_string.c_str(),
                                              response_string.length());
   }
-  return DataExtractor(buf, GetByteOrder(), GetAddressByteSize());
+  return lldb_private::DataExtractor(buf, GetByteOrder(), GetAddressByteSize());
 }
 
 StructuredData::ObjectSP
