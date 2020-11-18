@@ -187,7 +187,6 @@ bool BreakpointInjectedSite::ResolveTrapAddress(void *jit, size_t size) {
   const ArchSpec &arch = m_target_sp->GetArchitecture();
   const char *plugin_name = nullptr;
   const char *flavor = nullptr;
-  //  const ExecutionContext exe_ctx(m_target_sp, true);
   const bool prefer_file_cache = true;
 
   m_disassembler_sp = Disassembler::DisassembleRange(
@@ -250,6 +249,11 @@ bool BreakpointInjectedSite::GatherArgumentsMetadata() {
     return false;
   }
 
+  if (!decl_map->DoStructLayout()) {
+    LLDB_LOG(log, "FCB: Couldn't finalize DeclMap Struct Layout");
+    return false;
+  }
+
   uint32_t num_elements;
   size_t size;
   offset_t alignment;
@@ -258,6 +262,8 @@ bool BreakpointInjectedSite::GatherArgumentsMetadata() {
     LLDB_LOG(log, "FCB: Couldn't fetch arguments info from DeclMap");
     return false;
   }
+
+  ExpressionVariableList &members = decl_map->GetStructMembers();
 
   for (uint32_t i = 0; i < num_elements; ++i) {
     const clang::NamedDecl *decl = nullptr;
@@ -274,11 +280,17 @@ bool BreakpointInjectedSite::GatherArgumentsMetadata() {
                num_elements);
       return false;
     }
-  }
 
-  ExpressionVariableList &members = decl_map->GetStructMembers();
+    ExpressionVariableSP expr_var = members.GetVariableAtIndex(i);
 
-  for (ExpressionVariableSP expr_var : members.Variables()) {
+    if (!expr_var) {
+      LLDB_LOG(
+          log,
+          "FCB: Couldn't find expression variable for element '{}' ({}/{})",
+          name, i, num_elements);
+      return false;
+    }
+
     ValueObjectSP val_obj_sp = expr_var->GetValueObject();
 
     if (!val_obj_sp->GetVariable()) {
@@ -374,16 +386,6 @@ bool BreakpointInjectedSite::CreateArgumentsStructure() {
   }
 
   m_create_args_struct_function_sp = std::move(*utility_fn_or_error);
-
-  DiagnosticManager diagnostics;
-  ExecutionContext exe_ctx(m_target_sp->GetProcessSP());
-
-  if (!m_create_args_struct_function_sp->Install(diagnostics, exe_ctx)) {
-    error.SetErrorStringWithFormat("Couldn't install utility function:\n%s",
-                                   diagnostics.GetString().c_str());
-    m_create_args_struct_function_sp.reset();
-    return false;
-  }
 
   return true;
 }
