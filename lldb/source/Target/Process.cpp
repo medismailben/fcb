@@ -1813,16 +1813,23 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &owner,
       owner->SetBreakpointSite(bp_site_sp);
       return bp_site_sp->GetID();
     } else {
-      
-      ABISP abi_sp = GetABI();
-      std::string error;
-      if (!abi_sp) {
-        error = "FCB: Couldn't fetch target's ABI";
-        return FallbackToRegularBreakpointSite(owner, use_hardware, log,
-                                               error.c_str());
-      }
-      
-      if (owner->GetInjectCondition() && abi_sp->ImplementsJIT()) {
+      if (owner->GetInjectCondition()) {
+        ABISP abi_sp = GetABI();
+        std::string error;
+
+        // TODO: Make lambda to refactor error code.
+        if (!abi_sp) {
+          error = "FCB: Couldn't fetch target's ABI";
+          return FallbackToRegularBreakpointSite(owner, use_hardware, log,
+                                                 error.c_str());
+        }
+
+        if (!abi_sp->ImplementsJIT()) {
+          error = "FCB: ABI doesn't JIT breakpoints";
+          return FallbackToRegularBreakpointSite(owner, use_hardware, log,
+                                                 error.c_str());
+        }
+
         // Build user expression's IR from condition
         BreakpointInjectedSite *bp_injected_site = new BreakpointInjectedSite(
             &m_breakpoint_site_list, owner, load_addr);
@@ -1865,24 +1872,23 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &owner,
 
         bp_site_sp->AddOwner(owner);
       } else {
-
-        bp_site_sp.reset(new BreakpointSite(&m_breakpoint_site_list, owner,
-                                            load_addr, use_hardware));
+          bp_site_sp.reset(new BreakpointSite(&m_breakpoint_site_list, owner, load_addr, use_hardware));
       }
-      if (bp_site_sp) {
-        Status error = EnableBreakpointSite(bp_site_sp.get());
-        if (error.Success()) {
-          owner->SetBreakpointSite(bp_site_sp);
-          return m_breakpoint_site_list.Add(bp_site_sp);
-        } else {
-          if (show_error || use_hardware) {
-            // Report error for setting breakpoint...
-            GetTarget().GetDebugger().GetErrorStream().Printf(
-                "warning: failed to set breakpoint site at 0x%" PRIx64
-                " for breakpoint %i.%i: %s\n",
-                load_addr, owner->GetBreakpoint().GetID(), owner->GetID(),
-                error.AsCString() ? error.AsCString() : "unknown error");
-          }
+    }
+      
+    if (bp_site_sp) {
+      Status error = EnableBreakpointSite(bp_site_sp.get());
+      if (error.Success()) {
+        owner->SetBreakpointSite(bp_site_sp);
+        return m_breakpoint_site_list.Add(bp_site_sp);
+      } else {
+        if (show_error || use_hardware) {
+          // Report error for setting breakpoint...
+          GetTarget().GetDebugger().GetErrorStream().Printf(
+              "warning: failed to set breakpoint site at 0x%" PRIx64
+              " for breakpoint %i.%i: %s\n",
+              load_addr, owner->GetBreakpoint().GetID(), owner->GetID(),
+              error.AsCString() ? error.AsCString() : "unknown error");
         }
       }
     }
