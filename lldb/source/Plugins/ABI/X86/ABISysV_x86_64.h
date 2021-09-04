@@ -88,6 +88,9 @@ public:
 
   bool CreateDefaultUnwindPlan(lldb_private::UnwindPlan &unwind_plan) override;
 
+  bool CreateTrampolineUnwindPlan(lldb_private::UnwindPlan &unwind_plan,
+                                  lldb::addr_t return_address) override;
+
   bool RegisterIsVolatile(const lldb_private::RegisterInfo *reg_info) override;
 
   // The SysV x86_64 ABI requires that stack frames be 16 byte aligned.

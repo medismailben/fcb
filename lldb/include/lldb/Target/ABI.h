@@ -100,6 +100,11 @@ public:
 
   virtual bool CreateDefaultUnwindPlan(UnwindPlan &unwind_plan) = 0;
 
+  virtual bool CreateTrampolineUnwindPlan(UnwindPlan &unwind_plan,
+                                          lldb::addr_t return_address) {
+    return false;
+  }
+
   virtual bool RegisterIsVolatile(const RegisterInfo *reg_info) = 0;
 
   virtual bool
@@ -207,6 +212,9 @@ protected:
   virtual lldb::addr_t FixCodeAddress(lldb::addr_t pc, lldb::addr_t mask) {
     return pc;
   }
+
+  lldb::ModuleSP CreateModuleForFastConditionalBreakpointTrampoline(
+      lldb::addr_t address, std::size_t size, lldb::addr_t return_address);
 
 private:
   ABI(const ABI &) = delete;

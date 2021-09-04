@@ -864,6 +864,34 @@ size_t StackFrameList::GetStatus(Stream &strm, uint32_t first_frame,
     last_frame = first_frame + num_frames;
 
   StackFrameSP selected_frame_sp = m_thread.GetSelectedFrame();
+
+  StackFrameListSP sfl_sp = m_thread.GetStackFrameList();
+
+  uint32_t parent_frame_idx = first_frame;
+
+  SymbolContext sc;
+  sc = selected_frame_sp->GetSymbolContext(eSymbolContextSymbol);
+
+  if (Function *fn = sc.function) {
+    ConstString fn_name = fn->GetMangled().GetName();
+    if (fn_name.GetStringRef() == "$__lldb_expr(void*)") {
+      selected_frame_sp = m_thread.GetStackFrameAtIndex(++parent_frame_idx);
+      if (selected_frame_sp) {
+        sc = selected_frame_sp->GetSymbolContext(eSymbolContextSymbol);
+        if (Symbol *sym = sc.symbol) {
+          ConstString sym_name = sc.symbol->GetName();
+          if (sym_name.GetStringRef() ==
+              "$__lldb_jitted_conditional_bp_trampoline") {
+            if (m_thread.SetSelectedFrameByIndex(++parent_frame_idx)) {
+              selected_frame_sp = m_thread.GetSelectedFrame();
+              first_frame = parent_frame_idx;
+              last_frame += parent_frame_idx;
+            }
+          }
+        }
+      }
+    }
+  }
   const char *unselected_marker = nullptr;
   std::string buffer;
   if (selected_frame_marker) {
