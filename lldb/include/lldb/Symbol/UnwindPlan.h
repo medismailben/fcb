@@ -68,7 +68,8 @@ public:
         isAFAPlusOffset,   // reg = AFA + offset
         inOtherRegister,   // reg = other reg
         atDWARFExpression, // reg = deref(eval(dwarf_expr))
-        isDWARFExpression  // reg = eval(dwarf_expr)
+        isDWARFExpression, // reg = eval(dwarf_expr)
+        isConstValue,      // reg = value
       };
 
       RegisterLocation() : m_location() {}
@@ -105,6 +106,8 @@ public:
 
       bool IsDWARFExpression() const { return m_type == isDWARFExpression; }
 
+      bool IsConstantValue() const { return m_type == isConstValue; }
+
       void SetAtCFAPlusOffset(int32_t offset) {
         m_type = atCFAPlusOffset;
         m_location.offset = offset;
@@ -134,6 +137,17 @@ public:
         if (m_type == inOtherRegister)
           return m_location.reg_num;
         return LLDB_INVALID_REGNUM;
+      }
+
+      void SetConstValue(lldb::addr_t value) {
+        m_type = isConstValue;
+        m_location.const_value = value;
+      }
+
+      lldb::addr_t GetConstValue(void) {
+        if (m_type == isConstValue)
+          return m_location.const_value;
+        return LLDB_INVALID_ADDRESS;
       }
 
       RestoreType GetLocationType() const { return m_type; }
@@ -192,6 +206,7 @@ public:
           const uint8_t *opcodes;
           uint16_t length;
         } expr;
+        lldb::addr_t const_value;
       } m_location;
     };
 
@@ -341,6 +356,9 @@ public:
     FAValue &GetCFAValue() { return m_cfa_value; }
 
     FAValue &GetAFAValue() { return m_afa_value; }
+
+    bool SetRegisterLocationToConstantValue(uint32_t reg_num, lldb::addr_t addr,
+                                            bool can_replace);
 
     bool SetRegisterLocationToAtCFAPlusOffset(uint32_t reg_num, int32_t offset,
                                               bool can_replace);

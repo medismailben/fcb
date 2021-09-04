@@ -260,6 +260,28 @@ bool ABISysV_x86_64::SetupFastConditionalBreakpointTrampoline(
     return false;
   }
 
+  lldb::ModuleSP trampoline_module_sp =
+      CreateModuleForFastConditionalBreakpointTrampoline(
+          trampoline_addr, trampoline_size, jmp_addr);
+
+  if (!trampoline_module_sp) {
+    LLDB_LOG(log, "JIT: Couldn't get trampoline module");
+    return false;
+  }
+
+  Target &target = process_sp->GetTarget();
+  ModuleList &images = target.GetImages();
+  size_t image_count = images.GetSize();
+
+  images.Append(trampoline_module_sp);
+
+  if (images.GetSize() == image_count) {
+    LLDB_LOG(log, "JIT: Couldn't add trampoline module to image list");
+    return false;
+  }
+
+  jmp_addr = trampoline_addr;
+
   return true;
 }
 
@@ -1099,6 +1121,35 @@ bool ABISysV_x86_64::CreateDefaultUnwindPlan(UnwindPlan &unwind_plan) {
   unwind_plan.SetSourcedFromCompiler(eLazyBoolNo);
   unwind_plan.SetUnwindPlanValidAtAllInstructions(eLazyBoolNo);
   unwind_plan.SetUnwindPlanForSignalTrap(eLazyBoolNo);
+  return true;
+}
+
+// This defines the CFA as rsp+128
+// The saved pc is at value
+
+bool ABISysV_x86_64::CreateTrampolineUnwindPlan(UnwindPlan &unwind_plan,
+                                                addr_t return_address) {
+  unwind_plan.Clear();
+  unwind_plan.SetRegisterKind(eRegisterKindDWARF);
+
+  uint32_t sp_reg_num = dwarf_rsp;
+  uint32_t pc_reg_num = dwarf_rip;
+
+  UnwindPlan::RowSP row(new UnwindPlan::Row);
+
+  const int32_t ptr_size = 8;
+  row->GetCFAValue().SetIsRegisterPlusOffset(dwarf_rsp, 16 * ptr_size);
+  row->SetOffset(0);
+
+  // MARK: The PC is set to return address + 1 because the unwinder will usually
+  // try to decrement the PC to show the current instruction.
+  row->SetRegisterLocationToConstantValue(pc_reg_num, return_address + 1, true);
+  row->SetRegisterLocationToIsCFAPlusOffset(sp_reg_num, 0, true);
+
+  unwind_plan.AppendRow(row);
+  unwind_plan.SetSourceName("x86_64 trampoline unwind plan");
+  unwind_plan.SetSourcedFromCompiler(eLazyBoolNo);
+  unwind_plan.SetUnwindPlanValidAtAllInstructions(eLazyBoolNo);
   return true;
 }
 

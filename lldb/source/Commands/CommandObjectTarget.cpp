@@ -3452,6 +3452,13 @@ protected:
         result.GetOutputStream().Printf("\n");
       }
 
+      if (UnwindPlanSP plan_sp = func_unwinders_sp->GetTrampolineUnwindPlan()) {
+        result.GetOutputStream().Printf("Trampoline UnwindPlan:\n");
+        plan_sp->Dump(result.GetOutputStream(), thread.get(),
+                      LLDB_INVALID_ADDRESS);
+        result.GetOutputStream().Printf("\n");
+      }
+
       UnwindPlanSP arm_unwind_sp =
           func_unwinders_sp->GetArmUnwindUnwindPlan(*target);
       if (arm_unwind_sp) {

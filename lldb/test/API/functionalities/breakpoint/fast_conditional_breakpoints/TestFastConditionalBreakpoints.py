@@ -137,11 +137,30 @@ class FastConditionalBreakpoitsTestCase(TestBase):
 
         frame0 = thread.GetFrameAtIndex(0)
         expected_fn_name = "$__lldb_expr(void*)"
-        self.assertTrue(frame0 and frame0.GetFunctionName()
-                        == expected_fn_name)
+        self.assertTrue(frame0 and frame0.IsValid())
+        self.assertTrue(frame0.GetFunctionName() == expected_fn_name)
+
+        frame1 = thread.GetFrameAtIndex(1)
+        expected_fn_name = "$__lldb_jitted_conditional_bp_trampoline"
+        self.assertTrue(frame1 and frame0.IsValid())
+        self.assertTrue(frame1.GetFunctionName() == expected_fn_name)
+
+        frame2 = thread.GetFrameAtIndex(2)
+        expected_fn_name = "main"
+        self.assertTrue(frame2 and frame0.IsValid())
+        self.assertTrue(frame2.GetFunctionName() == expected_fn_name)
 
         # the hit count for the breakpoint should be 1.
         self.assertTrue(breakpoint.GetHitCount() == 1)
+
+        line = line_number(self.file.GetFilename(), self.comment)
+        self.assertTrue(frame2.GetLineEntry().GetLine() == line)
+
+        # TODO: Check that the variable is actually equal to "9"
+        # Currently, the assertion fails because the SBAPI doesn't
+        # report the right value for "local_count"
+        #var = frame2.FindVariable("local_count")
+        #self.assertEqual(var.GetValue(), "9")
 
     def inject_invalid_fast_conditional_breakpoint(self):
         # now create a breakpoint on main.c by source regex'.

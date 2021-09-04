@@ -61,6 +61,8 @@ UnwindPlanSP FuncUnwinders::GetUnwindPlanAtCallSite(Target &target,
                                                     Thread &thread) {
   std::lock_guard<std::recursive_mutex> guard(m_mutex);
 
+  if (UnwindPlanSP plan_sp = m_unwind_plan_trampoline_sp)
+    return plan_sp;
   if (UnwindPlanSP plan_sp = GetObjectFileUnwindPlan(target))
     return plan_sp;
   if (UnwindPlanSP plan_sp = GetSymbolFileUnwindPlan(thread))
@@ -382,6 +384,9 @@ LazyBool FuncUnwinders::CompareUnwindPlansForIdenticalInitialPCLocation(
 
 UnwindPlanSP FuncUnwinders::GetUnwindPlanAtNonCallSite(Target &target,
                                                        Thread &thread) {
+  if (m_unwind_plan_trampoline_sp)
+    return m_unwind_plan_trampoline_sp;
+
   UnwindPlanSP eh_frame_sp = GetEHFrameUnwindPlan(target);
   if (!eh_frame_sp)
     eh_frame_sp = GetDebugFrameUnwindPlan(target);
