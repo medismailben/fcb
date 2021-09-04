@@ -31,6 +31,7 @@ class Block;
 class Breakpoint;
 class BreakpointID;
 class BreakpointIDList;
+class BreakpointInjectedSite;
 class BreakpointList;
 class BreakpointLocation;
 class BreakpointLocationCollection;
@@ -41,6 +42,7 @@ class BreakpointOptions;
 class BreakpointPrecondition;
 class BreakpointResolver;
 class BreakpointSite;
+class BreakpointSiteList;
 class BroadcastEventSpec;
 class Broadcaster;
 class BroadcasterManager;
@@ -319,6 +321,11 @@ typedef std::shared_ptr<lldb_private::Block> BlockSP;
 typedef std::shared_ptr<lldb_private::Breakpoint> BreakpointSP;
 typedef std::weak_ptr<lldb_private::Breakpoint> BreakpointWP;
 typedef std::shared_ptr<lldb_private::BreakpointSite> BreakpointSiteSP;
+typedef std::weak_ptr<lldb_private::BreakpointSite> BreakpointSiteWP;
+typedef std::shared_ptr<lldb_private::BreakpointInjectedSite>
+    BreakpointInjectedSiteSP;
+typedef std::weak_ptr<lldb_private::BreakpointInjectedSite>
+    BreakpointInjectedSiteWP;
 typedef std::shared_ptr<lldb_private::BreakpointLocation> BreakpointLocationSP;
 typedef std::weak_ptr<lldb_private::BreakpointLocation> BreakpointLocationWP;
 typedef std::shared_ptr<lldb_private::BreakpointPrecondition>

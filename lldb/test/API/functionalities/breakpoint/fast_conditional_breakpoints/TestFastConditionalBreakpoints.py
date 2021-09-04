@@ -39,6 +39,20 @@ class FastConditionalBreakpoitsTestCase(TestBase):
         self.build()
         self.enable_fast_conditional_breakpoint(use_interpreter=False)
 
+    @skipIfWindows
+    @add_test_categories(["pyapi"])
+    def test_fast_conditional_breakpoint(self):
+        """Exercice injected breakpoint conditions"""
+        self.build()
+        self.inject_fast_conditional_breakpoint()
+
+    @skipIfWindows
+    @add_test_categories(["pyapi"])
+    def test_invalid_fast_conditional_breakpoint(self):
+        """Exercice invalid injected breakpoint conditions"""
+        self.build()
+        self.inject_invalid_fast_conditional_breakpoint()
+
     def enable_fast_conditional_breakpoint(self, use_interpreter):
         exe = self.getBuildArtifact(self.binary)
         self.target = self.dbg.CreateTarget(exe)
@@ -73,7 +87,8 @@ class FastConditionalBreakpoitsTestCase(TestBase):
                 "the thread name should be invalid")
 
             # Let's set the thread index for this breakpoint and verify that it is,
-            # indeed, being set correctly and there's only one thread for the process.
+            # indeed, being set correctly and there's only one thread for the
+            # process.
             breakpoint.SetThreadIndex(1)
             self.assertTrue(
                 breakpoint.GetThreadIndex() == 1,
@@ -99,3 +114,78 @@ class FastConditionalBreakpoitsTestCase(TestBase):
             self.assertTrue(
                 location.GetInjectCondition(),
                 VALID_BREAKPOINT_LOCATION)
+
+        return self.target.GetBreakpointAtIndex(0)
+
+    def inject_fast_conditional_breakpoint(self):
+        # now launch the process, and do not stop at entry point.
+        breakpoint = self.enable_fast_conditional_breakpoint(
+            use_interpreter=False)
+        process = self.target.LaunchSimple(
+            None, None, self.get_process_working_directory()
+        )
+        self.assertTrue(process, PROCESS_IS_VALID)
+
+        # frame #0 should be on self.line and the break condition should hold.
+        from lldbsuite.test.lldbutil import get_stopped_thread
+
+        thread = get_stopped_thread(process, lldb.eStopReasonBreakpoint)
+        self.assertTrue(
+            thread and thread.IsValid(),
+            "there should be a thread stopped due to breakpoint condition",
+        )
+
+        frame0 = thread.GetFrameAtIndex(0)
+        expected_fn_name = "$__lldb_expr(void*)"
+        self.assertTrue(frame0 and frame0.GetFunctionName()
+                        == expected_fn_name)
+
+        # the hit count for the breakpoint should be 1.
+        self.assertTrue(breakpoint.GetHitCount() == 1)
+
+    def inject_invalid_fast_conditional_breakpoint(self):
+        # now create a breakpoint on main.c by source regex'.
+        exe = self.getBuildArtifact(self.binary)
+        self.target = self.dbg.CreateTarget(exe)
+        self.assertTrue(self.target, VALID_TARGET)
+        breakpoint = self.target.BreakpointCreateBySourceRegex(
+            self.comment, self.file)
+        self.assertTrue(
+            breakpoint and breakpoint.GetNumLocations() == 1, VALID_BREAKPOINT
+        )
+
+        # set the condition on the breakpoint.
+        breakpoint.SetCondition("no_such_variable == not_this_one_either")
+        self.expect(
+            breakpoint.GetCondition(),
+            exe=False,
+            startstr="no_such_variable == not_this_one_either",
+        )
+        # get the breakpoint location from breakpoint after we verified that,
+        # indeed, it has one location.
+        location = breakpoint.GetLocationAtIndex(0)
+        self.assertTrue(
+            location and location.IsEnabled(),
+            VALID_BREAKPOINT_LOCATION)
+
+        # set condition on the breakpoint to be injected.
+        location.SetInjectCondition(True)
+        self.assertTrue(
+            location.GetInjectCondition(),
+            VALID_BREAKPOINT_LOCATION)
+
+        # now launch the process, and do not stop at entry point.
+        process = self.target.LaunchSimple(
+            None, None, self.get_process_working_directory()
+        )
+        self.assertTrue(process, PROCESS_IS_VALID)
+
+        # frame #0 should be on self.line1 and the break condition should hold.
+        from lldbsuite.test.lldbutil import get_stopped_thread
+
+        # FCB is disabled because the condition is not valid.
+        self.assertFalse(
+            location.GetInjectCondition(),
+            VALID_BREAKPOINT_LOCATION)
+        # FCB falls back to regular conditional breakpoint that get hit once.
+        self.assertTrue(breakpoint.GetHitCount() == 1)
