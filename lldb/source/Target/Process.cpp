@@ -1727,58 +1727,71 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &constituent,
       constituent->SetBreakpointSite(bp_site_sp);
       return bp_site_sp->GetID();
     } else {
-
-      ABISP abi_sp = GetABI();
-      std::string error;
-      if (!abi_sp) {
-        error = "FCB: Couldn't fetch target's ABI";
-        return FallbackToRegularBreakpointSite(owner, use_hardware, log,
-                                               error.c_str());
+      if (owner->GetInjectCondition()) {
+        ABISP abi_sp = GetABI();
+        std::string error;
+        
+        // TODO: Make lambda to refactor error code.
+        if (!abi_sp) {
+          error = "FCB: Couldn't fetch target's ABI";
+          return FallbackToRegularBreakpointSite(owner, use_hardware, log,
+                                                 error.c_str());
+        }
+        
+        if (!abi_sp->ImplementsJIT()) {
+          error = "FCB: ABI doesn't JIT breakpoints";
+          return FallbackToRegularBreakpointSite(owner, use_hardware, log,
+                                                 error.c_str());
+        }
+        
+        if (owner->GetInjectCondition() && abi_sp->ImplementsJIT()) {
+          // Build user expression's IR from condition
+          BreakpointInjectedSite *bp_injected_site = new BreakpointInjectedSite(
+                                                                                constituent, owner, load_addr);
+          
+          // Setup a call before the copied instructions
+          if (!bp_injected_site->BuildConditionExpression()) {
+            error = "FCB: Couldn't build the condition expression";
+            return FallbackToRegularBreakpointSite(owner, use_hardware, log,
+                                                   error.c_str());
+          }
+          
+          size_t instrs_size = SaveInstructions(owner->GetAddress());
+          
+          if (!instrs_size) {
+            error = "FCB: Couldn't save instructions";
+            
+            return FallbackToRegularBreakpointSite(owner, use_hardware, log,
+                                                   error.c_str());
+          }
+          
+          if (!abi_sp->SetupFastConditionalBreakpointTrampoline(
+                                                                instrs_size, m_overwritten_instructions, bp_injected_site)) {
+                                                                  error = "FCB: Couldn't setup trampoline";
+                                                                  
+                                                                  return FallbackToRegularBreakpointSite(owner, use_hardware, log,
+                                                                                                         error.c_str());
+                                                                }
+          
+          addr_t trap_addr = bp_injected_site->GetTrapAddress();
+          
+          if (trap_addr == LLDB_INVALID_ADDRESS) {
+            error = "FCB: Couldn't get trap address";
+            return FallbackToRegularBreakpointSite(owner, use_hardware, log,
+                                                   error.c_str());
+          }
+          
+          bp_site_sp.reset(bp_jitted_site);
+          bp_site_sp->AddOwner(owner);
+        } else {
+          
+          bp_site_sp->AddOwner(owner);
+        } else {
+          bp_site_sp.reset(
+                           new BreakpointSite(constituent, load_addr, use_hardware));
+        }
       }
-
-      if (owner->GetInjectCondition() && abi_sp->ImplementsJIT()) {
-        // Build user expression's IR from condition
-        BreakpointInjectedSite *bp_injected_site = new BreakpointInjectedSite(constituent, load_addr, use_hardware);
-
-        // Setup a call before the copied instructions
-        if (!bp_injected_site->BuildConditionExpression()) {
-          error = "FCB: Couldn't build the condition expression";
-          return FallbackToRegularBreakpointSite(owner, use_hardware, log,
-                                                 error.c_str());
-        }
-
-        size_t instrs_size = SaveInstructions(owner->GetAddress());
-
-        if (!instrs_size) {
-          error = "FCB: Couldn't save instructions";
-
-          return FallbackToRegularBreakpointSite(owner, use_hardware, log,
-                                                 error.c_str());
-        }
-
-        if (!abi_sp->SetupFastConditionalBreakpointTrampoline(
-                instrs_size, m_overwritten_instructions, bp_injected_site)) {
-          error = "FCB: Couldn't setup trampoline";
-
-          return FallbackToRegularBreakpointSite(owner, use_hardware, log,
-                                                 error.c_str());
-        }
-
-        addr_t trap_addr = bp_injected_site->GetTrapAddress();
-
-        if (trap_addr == LLDB_INVALID_ADDRESS) {
-          error = "FCB: Couldn't get trap address";
-          return FallbackToRegularBreakpointSite(owner, use_hardware, log,
-                                                 error.c_str());
-        }
-
-        bp_site_sp.reset(bp_jitted_site);
-        bp_site_sp->AddOwner(owner);
-      } else {
-
-        bp_site_sp.reset(
-          new BreakpointSite(constituent, load_addr, use_hardware));
-      }
+      
       if (bp_site_sp) {
         Status error = EnableBreakpointSite(bp_site_sp.get());
         if (error.Success()) {
@@ -1788,11 +1801,11 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &constituent,
           if (show_error || use_hardware) {
             // Report error for setting breakpoint...
             GetTarget().GetDebugger().GetErrorStream().Printf(
-                "warning: failed to set breakpoint site at 0x%" PRIx64
-                " for breakpoint %i.%i: %s\n",
-                load_addr, constituent->GetBreakpoint().GetID(),
-                constituent->GetID(),
-                error.AsCString() ? error.AsCString() : "unknown error");
+                                                              "warning: failed to set breakpoint site at 0x%" PRIx64
+                                                              " for breakpoint %i.%i: %s\n",
+                                                              load_addr, constituent->GetBreakpoint().GetID(),
+                                                              constituent->GetID(),
+                                                              error.AsCString() ? error.AsCString() : "unknown error");
           }
         }
       }
