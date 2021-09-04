@@ -90,6 +90,7 @@ add_lldb_library(lldbTarget
     lldbSymbol
     lldbUtility
     lldbPluginProcessUtility
+    lldbPluginObjectFileTrampoline
 
   LINK_COMPONENTS
     Support

@@ -7,16 +7,21 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Target/ABI.h"
+#include "Plugins/ObjectFile/Trampoline/ObjectFileTrampoline.h"
+#include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Value.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/Expression/ExpressionVariable.h"
 #include "lldb/Symbol/CompilerType.h"
+#include "lldb/Symbol/FuncUnwinders.h"
 #include "lldb/Symbol/TypeSystem.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
+#include "lldb/Utility/Logging.h"
+
 #include "llvm/MC/TargetRegistry.h"
 #include <cctype>
 
@@ -65,6 +70,65 @@ bool RegInfoBasedABI::GetRegisterInfoByName(llvm::StringRef name,
     }
   }
   return false;
+}
+
+lldb::ModuleSP ABI::CreateModuleForFastConditionalBreakpointTrampoline(
+    lldb::addr_t address, std::size_t size, lldb::addr_t return_address) {
+  Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_JIT_LOADER));
+
+  if (!ImplementsJIT()) {
+    LLDB_LOG(log, "JIT: ABI {} does not implement JIT-ed breakpoint condition",
+             GetPluginName().AsCString());
+    return nullptr;
+  }
+
+  ProcessSP process_sp = m_process_wp.lock();
+
+  lldb::ModuleSP trampoline_module_sp =
+      Module::CreateModuleFromObjectFile<ObjectFileTrampoline>(process_sp,
+                                                               address, size);
+
+  if (!trampoline_module_sp) {
+    LLDB_LOG(log, "JIT: Couldn't create module from trampoline ObjectFile");
+    return nullptr;
+  }
+
+  bool changed = false;
+  trampoline_module_sp->SetLoadAddress(process_sp->GetTarget(), 0, true,
+                                       changed);
+
+  Symtab *symtab = trampoline_module_sp->GetObjectFile()->GetSymtab();
+
+  if (!symtab || !symtab->GetNumSymbols()) {
+    LLDB_LOG(log, "JIT: Couldn't find any symbol or symbol table");
+    return nullptr;
+  }
+
+  Symbol *symbol = symtab->SymbolAtIndex(0);
+
+  SymbolContext sc(trampoline_module_sp, nullptr, nullptr, nullptr, nullptr,
+                   symbol);
+  UnwindTable &unwind_table = trampoline_module_sp->GetUnwindTable();
+  FuncUnwindersSP func_unwinders_sp =
+      unwind_table.GetFuncUnwindersContainingAddress(address, sc);
+
+  if (!func_unwinders_sp) {
+    LLDB_LOG(log, "JIT: Couldn't find any function unwinder for {} ({})",
+             symbol->GetName().AsCString(), address);
+    return nullptr;
+  }
+
+  UnwindPlanSP trampoline_unwind_plan_sp =
+      std::make_shared<UnwindPlan>(lldb::eRegisterKindGeneric);
+
+  if (!CreateTrampolineUnwindPlan(*trampoline_unwind_plan_sp, return_address)) {
+    LLDB_LOG(log, "JIT: Couldn't create trampoline unwind plan");
+    return nullptr;
+  }
+
+  func_unwinders_sp->SetTrampolineUnwindPlan(trampoline_unwind_plan_sp);
+
+  return trampoline_module_sp;
 }
 
 ValueObjectSP ABI::GetReturnValueObject(Thread &thread, CompilerType &ast_type,
