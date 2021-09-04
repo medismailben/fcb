@@ -1727,11 +1727,19 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &constituent,
       constituent->SetBreakpointSite(bp_site_sp);
       return bp_site_sp->GetID();
     } else {
-      if (owner->GetInjectCondition() && GetABI()->ImplementsJIT()) {
+
+      ABISP abi_sp = GetABI();
+      std::string error;
+      if (!abi_sp) {
+        error = "FCB: Couldn't fetch target's ABI";
+        return FallbackToRegularBreakpointSite(owner, use_hardware, log,
+                                               error.c_str());
+      }
+
+      if (owner->GetInjectCondition() && abi_sp->ImplementsJIT()) {
         // Build user expression's IR from condition
         BreakpointInjectedSite *bp_injected_site = new BreakpointInjectedSite(constituent, load_addr, use_hardware);
 
-        std::string error;
         // Setup a call before the copied instructions
         if (!bp_injected_site->BuildConditionExpression()) {
           error = "FCB: Couldn't build the condition expression";
@@ -1748,12 +1756,7 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &constituent,
                                                  error.c_str());
         }
 
-        const lldb::addr_t cond_expr_addr =
-            bp_injected_site->GetConditionExpressionAddress();
-        const lldb::addr_t util_func_addr =
-            bp_injected_site->GetUtilityFunctionAddress();
-
-        if (!GetABI()->SetupFastConditionalBreakpointTrampoline(
+        if (!abi_sp->SetupFastConditionalBreakpointTrampoline(
                 instrs_size, m_overwritten_instructions, bp_injected_site)) {
           error = "FCB: Couldn't setup trampoline";
 
