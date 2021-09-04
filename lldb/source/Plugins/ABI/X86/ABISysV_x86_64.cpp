@@ -18,6 +18,7 @@
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/Core/ValueObjectMemory.h"
 #include "lldb/Core/ValueObjectRegister.h"
+#include "lldb/Expression/IRMemoryMap.h"
 #include "lldb/Symbol/UnwindPlan.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/RegisterContext.h"
@@ -60,6 +61,206 @@ enum dwarf_regnums {
 
 bool ABISysV_x86_64::GetPointerReturnRegister(const char *&name) {
   name = "rax";
+  return true;
+}
+
+bool ABISysV_x86_64::SetupFastConditionalBreakpointTrampoline(
+    size_t instrs_size, uint8_t *instrs_data,
+    BreakpointInjectedSite *bp_injected_site) {
+  Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_JIT_LOADER));
+
+  lldb::addr_t jmp_addr = bp_injected_site->GetLoadAddress();
+
+  const lldb::addr_t cond_expr_addr =
+      bp_injected_site->GetConditionExpressionAddress();
+  const lldb::addr_t util_func_addr =
+      bp_injected_site->GetUtilityFunctionAddress();
+
+  ProcessSP process_sp = m_process_wp.lock();
+
+  // Copy saved instructions to the inferior memory buffer.
+  Status error;
+  uint8_t alignment = 8;
+  uint32_t permission =
+      ePermissionsReadable | ePermissionsWritable | ePermissionsExecutable;
+  IRMemoryMap::AllocationPolicy policy = IRMemoryMap::eAllocationPolicyMirror;
+
+  IRMemoryMap memory_map(process_sp->GetTarget().shared_from_this());
+
+  size_t context_size =
+      x86_64_saved_register_size + x86_64_volatile_register_size;
+
+  /// Saving General Purpose Registers.
+  size_t expected_trampoline_size = context_size;
+  /// Pass register context address to argument structure builder.
+  expected_trampoline_size += x86_64_mov_size;
+  /// Allocating argument structure on the stack.
+  expected_trampoline_size += x86_64_sub_size;
+  /// Pass argument structure address to argument structure builder.
+  expected_trampoline_size += x86_64_mov_size;
+  /// Call argument structure builder.
+  expected_trampoline_size += x86_64_call_size;
+  /// Pass returned argument structure to condition expression evaluator.
+  expected_trampoline_size += x86_64_mov_size;
+  /// Call condition expression evaluator.
+  expected_trampoline_size += x86_64_call_size;
+  /// Re-Align stack pointer
+  expected_trampoline_size += x86_64_add_size;
+  /// Restore General Purpose Registers.
+  expected_trampoline_size += context_size;
+  /// Run copied instructions.
+  expected_trampoline_size += instrs_size;
+  /// Jump back to user's code.
+  expected_trampoline_size += x86_64_jmp_size;
+
+  addr_t trampoline_addr = memory_map.Malloc(
+      expected_trampoline_size, alignment, permission, policy, true, error);
+
+  if (trampoline_addr == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "JIT: Couldn't allocate trampoline buffer");
+    return LLDB_INVALID_ADDRESS;
+  }
+
+  size_t trampoline_size = 0;
+
+  uint8_t trampoline_buffer[expected_trampoline_size];
+
+  uint8_t regs_ctx[context_size];
+  /// Saving General Purpose Registers.
+  for (size_t i = 0; i < 8; i++)
+    regs_ctx[i] = x86_64_push_opcode + i;
+  for (size_t i = 0; i < 8; i++) {
+    size_t offset = x86_64_volatile_register_size + 2 * i;
+    regs_ctx[offset] = x86_64_rexb_opcode;
+    regs_ctx[offset + 1] = x86_64_push_opcode + i;
+  }
+  std::memcpy(trampoline_buffer, &regs_ctx, context_size);
+  trampoline_size += context_size;
+
+  /// Pass register context address to argument structure builder.
+  uint8_t mov_buffer[x86_64_mov_size];
+  mov_buffer[0] = x86_64_rexw_opcode;
+  mov_buffer[1] = x86_64_mov_opcode;
+  mov_buffer[2] = x86_64_rsp_rdi_sib_byte; // mov rsp, rdi
+  std::memcpy(&trampoline_buffer[trampoline_size], &mov_buffer,
+              x86_64_mov_size);
+  trampoline_size += x86_64_mov_size;
+
+  size_t variable_count = bp_injected_site->GetVariableCount();
+  size_t address_size_in_byte =
+      bp_injected_site->GetTargetSP()->GetArchitecture().GetAddressByteSize();
+
+  /// Allocating argument structure on the stack.
+  uint8_t sub_buffer[x86_64_sub_size];
+  sub_buffer[0] = x86_64_rexw_opcode;
+  sub_buffer[1] = x86_64_sub_opcode;
+  sub_buffer[2] = x86_64_sub_byte;
+  sub_buffer[3] = variable_count * address_size_in_byte;
+  std::memcpy(&trampoline_buffer[trampoline_size], &sub_buffer,
+              x86_64_sub_size);
+  trampoline_size += x86_64_sub_size;
+
+  /// Pass register context address to argument structure builder.
+  mov_buffer[0] = x86_64_rexw_opcode;
+  mov_buffer[1] = x86_64_mov_opcode;
+  mov_buffer[2] = x86_64_rsp_rsi_sib_byte; // mov rsp, rsi
+  std::memcpy(&trampoline_buffer[trampoline_size], &mov_buffer,
+              x86_64_mov_size);
+  trampoline_size += x86_64_mov_size;
+
+  /// Call argument structure builder.
+  uint8_t call_buffer[x86_64_call_size];
+  uint32_t call_offset =
+      -x86_64_call_size - trampoline_size - trampoline_addr + util_func_addr;
+  call_buffer[0] = x86_64_call_opcode;
+  std::memcpy(&call_buffer[1], &call_offset, sizeof(uint32_t));
+  std::memcpy(&trampoline_buffer[trampoline_size], call_buffer,
+              x86_64_call_size);
+  trampoline_size += x86_64_call_size;
+
+  /// Pass returned argument structure to condition expression evaluator.
+  mov_buffer[2] = x86_64_rax_rdi_sib_byte; // mov rax, rdi
+  std::memcpy(&trampoline_buffer[trampoline_size], &mov_buffer,
+              x86_64_mov_size);
+  trampoline_size += x86_64_mov_size;
+
+  /// Call condition expression evaluator.
+  call_offset =
+      -x86_64_call_size - trampoline_size - trampoline_addr + cond_expr_addr;
+  call_buffer[0] = x86_64_call_opcode;
+  std::memcpy(&call_buffer[1], &call_offset, sizeof(uint32_t));
+  std::memcpy(&trampoline_buffer[trampoline_size], call_buffer,
+              x86_64_call_size);
+  trampoline_size += x86_64_call_size;
+
+  /// Re-Align stack pointer
+  uint8_t add_buffer[x86_64_add_size];
+  add_buffer[0] = x86_64_rexw_opcode;
+  add_buffer[1] = x86_64_add_opcode;
+  add_buffer[2] = x86_64_add_byte;
+  add_buffer[3] = variable_count * address_size_in_byte;
+  std::memcpy(&trampoline_buffer[trampoline_size], &add_buffer,
+              x86_64_sub_size);
+  trampoline_size += x86_64_add_size;
+
+  /// Restore General Purpose Registers.
+  for (size_t i = 0; i < 8; i++) {
+    regs_ctx[2 * i] = x86_64_rexb_opcode;
+    regs_ctx[2 * i + 1] =
+        x86_64_pop_opcode + x86_64_volatile_register_size - i - 1;
+  }
+  for (size_t i = 0; i < 8; i++)
+    regs_ctx[x86_64_saved_register_size + i] =
+        x86_64_pop_opcode + x86_64_volatile_register_size - i - 1;
+  std::memcpy(&trampoline_buffer[trampoline_size], &regs_ctx, context_size);
+  trampoline_size += context_size;
+
+  /// Run copied instructions.
+  std::memcpy(&trampoline_buffer[trampoline_size], instrs_data, instrs_size);
+  trampoline_size += instrs_size;
+
+  /// Jump back to user's code.
+  uint8_t jmp_buffer[x86_64_jmp_size];
+  uint32_t jmp_offset = jmp_addr - trampoline_addr - trampoline_size;
+
+  jmp_buffer[0] = x86_64_jmp_opcode;
+  std::memcpy(&jmp_buffer[1], &jmp_offset, sizeof(uint32_t));
+  std::memcpy(&trampoline_buffer[trampoline_size], jmp_buffer, x86_64_jmp_size);
+  trampoline_size += x86_64_jmp_size;
+
+  if (trampoline_size != expected_trampoline_size) {
+    LLDB_LOG(
+        log,
+        "JIT: Trampoline size ({0} bytes) is not the one expected ({1} bytes)",
+        trampoline_size, expected_trampoline_size);
+    return false;
+  }
+
+  size_t written_bytes = process_sp->WriteMemory(
+      trampoline_addr, &trampoline_buffer, trampoline_size, error);
+
+  if (written_bytes != trampoline_size || error.Fail()) {
+    LLDB_LOG(log, "JIT: Couldn't write trampoline buffer to inferior");
+    return false;
+  }
+
+  // Overwrite current instruction with JMP.
+  jmp_offset = trampoline_addr - jmp_addr - x86_64_jmp_size;
+
+  jmp_buffer[0] = x86_64_jmp_opcode;
+  std::memcpy(&jmp_buffer[1], &jmp_offset, sizeof(uint32_t));
+
+  for (size_t i = 0; i < x86_64_jmp_size; i++)
+    LLDB_LOGV(log, "0x{:x}", jmp_buffer[i]);
+
+  written_bytes =
+      process_sp->WriteMemory(jmp_addr, jmp_buffer, x86_64_jmp_size, error);
+
+  if (written_bytes != x86_64_jmp_size || error.Fail()) {
+    LLDB_LOG(log, "JIT: Couldn't override instruction with branching");
+    return false;
+  }
+
   return true;
 }
 

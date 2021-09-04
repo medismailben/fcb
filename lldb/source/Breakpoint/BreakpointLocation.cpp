@@ -260,6 +260,12 @@ bool BreakpointLocation::ConditionSaysStop(ExecutionContext &exe_ctx,
 
   bool inject_condition = GetInjectCondition();
 
+  if (inject_condition) {
+    // TODO: Evalutates condition is case of multi-condition
+    // BreakpointInjectSite
+    return true;
+  }
+
   error.Clear();
 
   DiagnosticManager diagnostics;

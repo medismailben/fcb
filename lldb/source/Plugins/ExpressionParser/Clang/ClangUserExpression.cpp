@@ -562,6 +562,8 @@ bool ClangUserExpression::TryParse(
   ResetDeclMap(exe_ctx, m_result_delegate, keep_result_in_memory);
 
   auto on_exit = llvm::make_scope_exit([this]() { ResetDeclMap(); });
+  if (m_options.GetInjectCondition())
+    on_exit.release();
 
   if (!DeclMap()->WillParse(exe_ctx, GetMaterializer())) {
     diagnostic_manager.PutString(

@@ -147,6 +147,46 @@ public:
 
   virtual bool GetPointerReturnRegister(const char *&name) { return false; }
 
+  /// Allocate a memory stub for the fast condition breakpoint trampoline, and
+  /// build it by saving the register context, calling the argument structure
+  /// builder, passing the resulting structure to the condition checker,
+  /// restoring the register context, running the copied instructions and]
+  /// jumping back to the user source code.
+  ///
+  /// \param[in] instrs_size
+  ///    The size in bytes of the copied instructions.
+  ///
+  /// \param[in] data
+  ///    The copied instructions buffer.
+  ///
+  /// \param[in] jmp_addr
+  ///    The address of the source .
+  ///
+  /// \param[in] util_func_addr
+  ///    The address of the JIT-ed argument structure builder.
+  ///
+  /// \param[in] cond_expr_addr
+  ///    The address of the JIT-ed condition checker.
+  ///
+  /// \return
+  ///    The address of the Fast Conditional Breakpoint Trampoline.
+  ///
+  virtual bool SetupFastConditionalBreakpointTrampoline(
+      size_t instrs_size, uint8_t *instrs_data,
+      BreakpointInjectedSite *bp_inject_site) {
+    return false;
+  }
+
+  virtual llvm::ArrayRef<uint8_t> GetJumpOpcode() { return 0; }
+
+  virtual size_t GetJumpSize() { return 0; }
+
+  virtual llvm::StringRef GetRegisterContextAsString() { return ""; }
+
+  virtual llvm::StringRef GetMachTypesAsString() { return ""; }
+
+  virtual bool ImplementsJIT() { return false; }
+
   static lldb::ABISP FindPlugin(lldb::ProcessSP process_sp, const ArchSpec &arch);
 
 protected:

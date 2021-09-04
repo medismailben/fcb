@@ -11,6 +11,7 @@
 
 #include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Symbol/Variable.h"
+#include "lldb/Utility/Iterable.h"
 #include "lldb/lldb-private.h"
 
 namespace lldb_private {
@@ -82,6 +83,13 @@ private:
   // For VariableList only
   VariableList(const VariableList &) = delete;
   const VariableList &operator=(const VariableList &) = delete;
+
+public:
+  typedef AdaptedIterable<collection, lldb::VariableSP, vector_adapter>
+      VariableListCollectionIterable;
+  VariableListCollectionIterable Variables() {
+    return VariableListCollectionIterable(m_variables);
+  }
 };
 
 } // namespace lldb_private

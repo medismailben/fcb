@@ -325,7 +325,7 @@ protected:
 
   bool ParsePythonTargetDefinition(const FileSpec &target_definition_fspec);
 
-  DataExtractor GetAuxvData() override;
+  lldb_private::DataExtractor GetAuxvData() override;
 
   StructuredData::ObjectSP GetExtendedInfoForThread(lldb::tid_t tid);
 
