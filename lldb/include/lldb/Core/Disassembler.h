@@ -20,6 +20,7 @@
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/FileSpec.h"
+#include "lldb/Utility/Iterable.h"
 #include "lldb/lldb-defines.h"
 #include "lldb/lldb-forward.h"
 #include "lldb/lldb-private-enumerations.h"
@@ -324,10 +325,16 @@ public:
 
 private:
   typedef std::vector<lldb::InstructionSP> collection;
+  collection m_instructions;
+
+public:
   typedef collection::iterator iterator;
   typedef collection::const_iterator const_iterator;
-
-  collection m_instructions;
+  typedef AdaptedIterable<collection, lldb::InstructionSP, vector_adapter>
+      InstructionListCollectionIterable;
+  InstructionListCollectionIterable Instructions() {
+    return InstructionListCollectionIterable(m_instructions);
+  }
 };
 
 class PseudoInstruction : public Instruction {

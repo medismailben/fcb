@@ -21,8 +21,10 @@
 #include <unordered_set>
 #include <vector>
 
+#include "lldb/Breakpoint/BreakpointInjectedSite.h"
 #include "lldb/Breakpoint/BreakpointSiteList.h"
 #include "lldb/Core/Communication.h"
+#include "lldb/Core/Disassembler.h"
 #include "lldb/Core/LoadedModuleInfoList.h"
 #include "lldb/Core/PluginInterface.h"
 #include "lldb/Core/ThreadSafeValue.h"
@@ -2045,6 +2047,13 @@ public:
   lldb::break_id_t CreateBreakpointSite(const lldb::BreakpointLocationSP &owner,
                                         bool use_hardware);
 
+  lldb::break_id_t
+  FallbackToRegularBreakpointSite(const lldb::BreakpointLocationSP &owner,
+                                  bool use_hardware, Log *log,
+                                  const char *error);
+
+  size_t SaveInstructions(Address &address);
+
   Status DisableBreakpointSiteByID(lldb::user_id_t break_id);
 
   Status EnableBreakpointSiteByID(lldb::user_id_t break_id);
@@ -2955,6 +2964,8 @@ protected:
 
   std::unique_ptr<UtilityFunction> m_dlopen_utility_func_up;
   llvm::once_flag m_dlopen_utility_func_flag_once;
+
+  uint8_t *m_overwritten_instructions = nullptr;
 
   size_t RemoveBreakpointOpcodesFromBuffer(lldb::addr_t addr, size_t size,
                                            uint8_t *buf) const;

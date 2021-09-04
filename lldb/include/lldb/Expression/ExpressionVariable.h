@@ -16,6 +16,7 @@
 
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/Iterable.h"
 #include "lldb/lldb-public.h"
 
 namespace lldb_private {
@@ -197,7 +198,19 @@ public:
   void Clear() { m_variables.clear(); }
 
 private:
-  std::vector<lldb::ExpressionVariableSP> m_variables;
+  typedef std::vector<lldb::ExpressionVariableSP> collection;
+  typedef collection::iterator iterator;
+  typedef collection::const_iterator const_iterator;
+
+  collection m_variables;
+
+public:
+  typedef AdaptedIterable<collection, lldb::ExpressionVariableSP,
+                          vector_adapter>
+      ExpressionVariableListCollectionIterable;
+  ExpressionVariableListCollectionIterable Variables() {
+    return ExpressionVariableListCollectionIterable(m_variables);
+  }
 };
 
 class PersistentExpressionState : public ExpressionVariableList {

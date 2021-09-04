@@ -1614,8 +1614,21 @@ Status Process::EnableBreakpointSiteByID(lldb::user_id_t break_id) {
 }
 
 lldb::break_id_t
+Process::FallbackToRegularBreakpointSite(const BreakpointLocationSP &owner,
+                                         bool use_hardware, Log *log,
+                                         const char *error) {
+  LLDB_LOG(log, error);
+  LLDB_LOG(log, "Disabling JIT-ed condition and falling back to regular "
+                "conditional breakpoint");
+  owner->SetInjectCondition(false);
+  return CreateBreakpointSite(owner, use_hardware);
+}
+
+lldb::break_id_t
 Process::CreateBreakpointSite(const BreakpointLocationSP &owner,
                               bool use_hardware) {
+  Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_JIT_LOADER));
+
   addr_t load_addr = LLDB_INVALID_ADDRESS;
 
   bool show_error = true;
@@ -1676,11 +1689,78 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &owner,
 
     if (bp_site_sp) {
       bp_site_sp->AddOwner(owner);
+
+      if (owner->GetInjectCondition()) {
+        BreakpointSite *bp_site = bp_site_sp.get();
+
+        BreakpointInjectedSite *bp_injected_site_sp =
+            llvm::dyn_cast<BreakpointInjectedSite>(bp_site);
+
+        std::string error;
+
+        if (!bp_injected_site_sp->BuildConditionExpression()) {
+          error = "FCB: Couldn't build the condition expression";
+          return FallbackToRegularBreakpointSite(owner, use_hardware, log,
+                                                 error.c_str());
+        }
+      }
+
       owner->SetBreakpointSite(bp_site_sp);
       return bp_site_sp->GetID();
     } else {
-      bp_site_sp.reset(new BreakpointSite(&m_breakpoint_site_list, owner,
-                                          load_addr, use_hardware));
+      if (owner->GetInjectCondition() && GetABI()->ImplementsJIT()) {
+        // Build user expression's IR from condition
+        BreakpointInjectedSite *bp_injected_site = new BreakpointInjectedSite(
+            &m_breakpoint_site_list, owner, load_addr);
+
+        std::string error;
+        // Setup a call before the copied instructions
+        if (!bp_injected_site->BuildConditionExpression()) {
+          error = "FCB: Couldn't build the condition expression";
+          return FallbackToRegularBreakpointSite(owner, use_hardware, log,
+                                                 error.c_str());
+        }
+
+        size_t instrs_size = SaveInstructions(owner->GetAddress());
+
+        if (!instrs_size) {
+          error = "FCB: Couldn't save instructions";
+
+          return FallbackToRegularBreakpointSite(owner, use_hardware, log,
+                                                 error.c_str());
+        }
+
+        const lldb::addr_t cond_expr_addr =
+            bp_injected_site->GetConditionExpressionAddress();
+        const lldb::addr_t util_func_addr =
+            bp_injected_site->GetUtilityFunctionAddress();
+
+        if (!GetABI()->SetupFastConditionalBreakpointTrampoline(
+                instrs_size, m_overwritten_instructions, bp_injected_site)) {
+          error = "FCB: Couldn't setup trampoline";
+
+          return FallbackToRegularBreakpointSite(owner, use_hardware, log,
+                                                 error.c_str());
+        }
+
+        addr_t trap_addr = bp_injected_site->GetTrapAddress();
+
+        if (trap_addr == LLDB_INVALID_ADDRESS) {
+          error = "FCB: Couldn't get trap address";
+          return FallbackToRegularBreakpointSite(owner, use_hardware, log,
+                                                 error.c_str());
+        }
+
+        // bp_site_sp.reset(bp_jitted_site);
+        bp_site_sp.reset(new BreakpointSite(&m_breakpoint_site_list, owner,
+                                            trap_addr, use_hardware));
+
+        bp_site_sp->AddOwner(owner);
+      } else {
+
+        bp_site_sp.reset(new BreakpointSite(&m_breakpoint_site_list, owner,
+                                            load_addr, use_hardware));
+      }
       if (bp_site_sp) {
         Status error = EnableBreakpointSite(bp_site_sp.get());
         if (error.Success()) {
@@ -1701,6 +1781,85 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &owner,
   }
   // We failed to enable the breakpoint
   return LLDB_INVALID_BREAK_ID;
+}
+
+size_t Process::SaveInstructions(Address &address) {
+  Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_JIT_LOADER));
+
+  TargetSP target_sp = m_target_wp.lock();
+  const char *plugin_name = nullptr;
+  const char *flavor = nullptr;
+  const bool prefer_file_cache = true;
+
+  Function *function = address.CalculateSymbolContextFunction();
+
+  if (!function) {
+    LLDB_LOG(log, "JIT: No function in the SymbolContext");
+    return 0;
+  }
+
+  lldb::addr_t addr = address.GetCallableLoadAddress(target_sp.get());
+
+  const AddressRange disasm_range(addr,
+                                  function->GetAddressRange().GetByteSize());
+
+  DisassemblerSP disassembler_sp = Disassembler::DisassembleRange(
+      target_sp->GetArchitecture(), plugin_name, flavor, *target_sp.get(),
+      disasm_range, prefer_file_cache);
+
+  if (!disassembler_sp) {
+    LLDB_LOG(log, "JIT: Couldn't disassemble '{0}' function",
+             function->GetName());
+    return 0;
+  }
+
+  InstructionList *instructions = &disassembler_sp->GetInstructionList();
+
+  DataExtractor data;
+
+  size_t instructions_count = 0;
+  size_t instructions_size = 0;
+
+  for (size_t i = 0; i < instructions->GetSize(); i++) {
+    InstructionSP instruction = instructions->GetInstructionAtIndex(i);
+
+    instruction->GetData(data);
+    uint32_t size = instruction->Decode(*disassembler_sp.get(), data, 0);
+
+    if (instructions_size < GetABI()->GetJumpSize()) {
+      instructions_size += size;
+      instructions_count++;
+    }
+
+    const ExecutionContext exe_ctx(this);
+
+    LLDB_LOGV(log, "%#llx <+%llu>: %s, %s\t\t(%u)",
+              instruction->GetAddress().GetLoadAddress(target_sp.get()),
+              instruction->GetAddress().GetOffset(),
+              instruction->GetMnemonic(&exe_ctx),
+              instruction->GetOperands(&exe_ctx), size);
+  }
+
+  LLDB_LOGV(log, "JIT: Instruction count: {0}", instructions_count);
+
+  Status error;
+  m_overwritten_instructions = reinterpret_cast<uint8_t *>(
+      std::calloc(instructions_size, sizeof(uint8_t)));
+
+  if (!m_overwritten_instructions) {
+    LLDB_LOG(log, "JIT: Couldn't allocate instruction buffer");
+    return 0;
+  }
+
+  size_t memory_read =
+      ReadMemory(addr, m_overwritten_instructions, instructions_size, error);
+
+  if (memory_read != instructions_size || error.Fail()) {
+    LLDB_LOG(log, "JIT: Couldn't copy instruction to buffer");
+    return 0;
+  }
+
+  return memory_read;
 }
 
 void Process::RemoveOwnerFromBreakpointSite(lldb::user_id_t owner_id,
