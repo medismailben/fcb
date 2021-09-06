@@ -324,6 +324,31 @@ bool SBBreakpoint::GetAutoContinue() {
   return false;
 }
 
+void SBBreakpoint::SetInjectCondition(bool inject_condition) {
+  LLDB_RECORD_METHOD(void, SBBreakpoint, SetInjectCondition, (bool),
+                     inject_condition);
+
+  BreakpointSP bkpt_sp = GetSP();
+  if (!bkpt_sp)
+    return;
+
+  std::lock_guard<std::recursive_mutex> guard(
+      bkpt_sp->GetTarget().GetAPIMutex());
+  bkpt_sp->SetInjectCondition(inject_condition);
+}
+
+bool SBBreakpoint::GetInjectCondition() {
+  LLDB_RECORD_METHOD_NO_ARGS(bool, SBBreakpoint, GetInjectCondition);
+
+  BreakpointSP bkpt_sp = GetSP();
+  if (!bkpt_sp)
+    return false;
+
+  std::lock_guard<std::recursive_mutex> guard(
+      bkpt_sp->GetTarget().GetAPIMutex());
+  return bkpt_sp->GetInjectCondition();
+}
+
 uint32_t SBBreakpoint::GetHitCount() const {
   LLDB_RECORD_METHOD_CONST_NO_ARGS(uint32_t, SBBreakpoint, GetHitCount);
 
@@ -1020,6 +1045,8 @@ void RegisterMethods<SBBreakpoint>(Registry &R) {
   LLDB_REGISTER_METHOD(const char *, SBBreakpoint, GetCondition, ());
   LLDB_REGISTER_METHOD(void, SBBreakpoint, SetAutoContinue, (bool));
   LLDB_REGISTER_METHOD(bool, SBBreakpoint, GetAutoContinue, ());
+  LLDB_REGISTER_METHOD(void, SBBreakpoint, SetInjectCondition, (bool));
+  LLDB_REGISTER_METHOD(bool, SBBreakpoint, GetInjectCondition, ());
   LLDB_REGISTER_METHOD_CONST(uint32_t, SBBreakpoint, GetHitCount, ());
   LLDB_REGISTER_METHOD_CONST(uint32_t, SBBreakpoint, GetIgnoreCount, ());
   LLDB_REGISTER_METHOD(void, SBBreakpoint, SetThreadID, (lldb::tid_t));

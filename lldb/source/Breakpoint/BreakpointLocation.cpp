@@ -231,6 +231,19 @@ const char *BreakpointLocation::GetConditionText(size_t *hash) const {
       .GetConditionText(hash);
 }
 
+bool BreakpointLocation::GetInjectCondition() const {
+  if (m_options_up &&
+      m_options_up->IsOptionSet(BreakpointOptions::eInjectCondition))
+    return m_options_up->GetInjectCondition();
+  return m_owner.GetInjectCondition();
+}
+
+void BreakpointLocation::SetInjectCondition(bool inject_condition) {
+  m_owner.SetInjectCondition(inject_condition);
+  GetLocationOptions().SetInjectCondition(inject_condition);
+  SendBreakpointLocationChangedEvent(eBreakpointEventTypeInjectedCondition);
+}
+
 bool BreakpointLocation::ConditionSaysStop(ExecutionContext &exe_ctx,
                                            Status &error) {
   Log *log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_BREAKPOINTS);
@@ -244,6 +257,8 @@ bool BreakpointLocation::ConditionSaysStop(ExecutionContext &exe_ctx,
     m_user_expression_sp.reset();
     return false;
   }
+
+  bool inject_condition = GetInjectCondition();
 
   error.Clear();
 
@@ -268,9 +283,12 @@ bool BreakpointLocation::ConditionSaysStop(ExecutionContext &exe_ctx,
       return true;
     }
 
-    if (!m_user_expression_sp->Parse(diagnostics, exe_ctx,
-                                     eExecutionPolicyOnlyWhenNeeded, true,
-                                     false)) {
+    ExecutionPolicy execution_policy = inject_condition
+                                           ? eExecutionPolicyAlways
+                                           : eExecutionPolicyOnlyWhenNeeded;
+
+    if (!m_user_expression_sp->Parse(diagnostics, exe_ctx, execution_policy,
+                                     true, false)) {
       error.SetErrorStringWithFormat(
           "Couldn't parse conditional expression:\n%s",
           diagnostics.GetString().c_str());
@@ -292,6 +310,7 @@ bool BreakpointLocation::ConditionSaysStop(ExecutionContext &exe_ctx,
   options.SetTryAllThreads(true);
   options.SetResultIsInternal(
       true); // Don't generate a user variable for condition expressions.
+  options.SetInjectCondition(inject_condition);
 
   Status expr_error;
 

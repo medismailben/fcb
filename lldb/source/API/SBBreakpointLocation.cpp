@@ -208,6 +208,32 @@ bool SBBreakpointLocation::GetAutoContinue() {
   return false;
 }
 
+void SBBreakpointLocation::SetInjectCondition(bool inject_condition) {
+  LLDB_RECORD_METHOD(void, SBBreakpointLocation, SetInjectCondition, (bool),
+                     inject_condition);
+
+  BreakpointLocationSP loc_sp = GetSP();
+  if (!loc_sp)
+    return;
+
+  std::lock_guard<std::recursive_mutex> guard(
+      loc_sp->GetTarget().GetAPIMutex());
+  loc_sp->SetInjectCondition(inject_condition);
+  loc_sp->GetBreakpoint().SetInjectCondition(inject_condition);
+}
+
+bool SBBreakpointLocation::GetInjectCondition() {
+  LLDB_RECORD_METHOD_NO_ARGS(bool, SBBreakpointLocation, GetInjectCondition);
+
+  BreakpointLocationSP loc_sp = GetSP();
+  if (!loc_sp)
+    return false;
+
+  std::lock_guard<std::recursive_mutex> guard(
+      loc_sp->GetTarget().GetAPIMutex());
+  return loc_sp->GetInjectCondition();
+}
+
 void SBBreakpointLocation::SetScriptCallbackFunction(
   const char *callback_function_name) {
 LLDB_RECORD_METHOD(void, SBBreakpointLocation, SetScriptCallbackFunction,
@@ -497,6 +523,8 @@ void RegisterMethods<SBBreakpointLocation>(Registry &R) {
   LLDB_REGISTER_METHOD(const char *, SBBreakpointLocation, GetCondition, ());
   LLDB_REGISTER_METHOD(void, SBBreakpointLocation, SetAutoContinue, (bool));
   LLDB_REGISTER_METHOD(bool, SBBreakpointLocation, GetAutoContinue, ());
+  LLDB_REGISTER_METHOD(void, SBBreakpointLocation, SetInjectCondition, (bool));
+  LLDB_REGISTER_METHOD(bool, SBBreakpointLocation, GetInjectCondition, ());
   LLDB_REGISTER_METHOD(void, SBBreakpointLocation, SetScriptCallbackFunction,
                        (const char *));
   LLDB_REGISTER_METHOD(SBError, SBBreakpointLocation, SetScriptCallbackFunction,

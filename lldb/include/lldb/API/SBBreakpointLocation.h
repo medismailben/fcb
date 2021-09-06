@@ -53,6 +53,10 @@ public:
 
   bool GetAutoContinue();
 
+  void SetInjectCondition(bool inject_condition);
+
+  bool GetInjectCondition();
+
   void SetScriptCallbackFunction(const char *callback_function_name);
 
   SBError SetScriptCallbackFunction(const char *callback_function_name,

@@ -97,6 +97,13 @@ public:
       else
         m_bp_opts.SetIgnoreCount(ignore_count);
     } break;
+    case 'I': {
+      if (!m_bp_opts.IsOptionSet(BreakpointOptions::eCondition))
+        error.SetErrorString("inject-condition option only available for "
+                             "conditional breakpoints");
+      else
+        m_bp_opts.SetInjectCondition(true);
+    } break;
     case 'o': {
       bool value, success;
       value = OptionArgParser::ToBoolean(option_arg, false, &success);
