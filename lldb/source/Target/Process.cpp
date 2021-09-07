@@ -1737,14 +1737,14 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &constituent,
           return FallbackToRegularBreakpointSite(owner, use_hardware, log,
                                                  error.c_str());
         }
-        
-        if (!abi_sp->ImplementsJIT()) {
+
+        if (!abi_sp->SupportsFCB()) {
           error = "FCB: ABI doesn't JIT breakpoints";
           return FallbackToRegularBreakpointSite(owner, use_hardware, log,
                                                  error.c_str());
         }
-        
-        if (owner->GetInjectCondition() && abi_sp->ImplementsJIT()) {
+
+        if (owner->GetInjectCondition() && abi_sp->SupportsFCB()) {
           // Build user expression's IR from condition
           BreakpointInjectedSite *bp_injected_site = new BreakpointInjectedSite(
                                                                                 constituent, owner, load_addr);
