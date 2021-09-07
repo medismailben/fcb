@@ -65,6 +65,8 @@ public:
 
   ~ABISysV_x86_64() override = default;
 
+  llvm::Expected<OpcodeArray> GetDebugTrapOpcode() override;
+
   size_t GetRedZoneSize() const override;
 
   bool PrepareTrivialCall(lldb_private::Thread &thread, lldb::addr_t sp,
@@ -120,6 +122,7 @@ public:
   }
 
   bool GetPointerReturnRegister(const char *&name) override;
+  bool GetFramePointerRegister(const char *&name) override;
 
   /// Allocate a memory stub for the fast condition breakpoint trampoline, and
   /// build it by saving the register context, calling the argument structure
@@ -151,9 +154,11 @@ public:
 
   size_t GetJumpSize() override { return x86_64_jmp_size; }
 
-  llvm::StringRef GetRegisterContextAsString() { return register_context; }
+  llvm::StringRef GetRegisterContextAsString() override {
+    return register_context;
+  }
 
-  bool ImplementsJIT() override { return true; }
+  bool SupportsFCB() override { return true; }
 
   // Static Functions
 

@@ -17,6 +17,7 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/MC/MCRegisterInfo.h"
+#include "llvm/Support/Errc.h"
 
 namespace llvm {
 class Type;
@@ -37,6 +38,8 @@ public:
     lldb::addr_t value;                 /* literal value */
     std::unique_ptr<uint8_t[]> data_up; /* host data pointer */
   };
+
+  using OpcodeArray = llvm::ArrayRef<llvm::SmallVector<uint8_t, 8>>;
 
   ~ABI() override;
 
@@ -137,6 +140,7 @@ public:
   AugmentRegisterInfo(std::vector<DynamicRegisterInfo::Register> &regs) = 0;
 
   virtual bool GetPointerReturnRegister(const char *&name) { return false; }
+  virtual bool GetFramePointerRegister(const char *&name) { return false; }
 
   /// Allocate a memory stub for the fast condition breakpoint trampoline, and
   /// build it by saving the register context, calling the argument structure
@@ -176,7 +180,12 @@ public:
 
   virtual llvm::StringRef GetMachTypesAsString() { return ""; }
 
-  virtual bool ImplementsJIT() { return false; }
+  virtual bool SupportsFCB() { return false; }
+
+  virtual llvm::Expected<OpcodeArray> GetDebugTrapOpcode() {
+    return llvm::createStringError(llvm::errc::invalid_argument,
+                                   "Unknown Debug Trap Opcode");
+  }
 
   static lldb::ABISP FindPlugin(lldb::ProcessSP process_sp, const ArchSpec &arch);
 
@@ -185,6 +194,8 @@ protected:
       : m_process_wp(process_sp), m_mc_register_info_up(std::move(info_up)) {
     assert(m_mc_register_info_up && "ABI must have MCRegisterInfo");
   }
+
+  using ByteArray = llvm::ArrayRef<llvm::SmallVector<uint8_t, 4>>;
 
   /// Utility function to construct a MCRegisterInfo using the ArchSpec triple.
   /// Plugins wishing to customize the construction can construct the

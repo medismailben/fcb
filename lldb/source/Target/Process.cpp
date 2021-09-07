@@ -1719,13 +1719,13 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &owner,
                                                  error.c_str());
         }
 
-        if (!abi_sp->ImplementsJIT()) {
+        if (!abi_sp->SupportsFCB()) {
           error = "FCB: ABI doesn't JIT breakpoints";
           return FallbackToRegularBreakpointSite(owner, use_hardware, log,
                                                  error.c_str());
         }
 
-        if (owner->GetInjectCondition() && abi_sp->ImplementsJIT()) {
+        if (owner->GetInjectCondition() && abi_sp->SupportsFCB()) {
           // Build user expression's IR from condition
           BreakpointInjectedSite *bp_injected_site = new BreakpointInjectedSite(
               &m_breakpoint_site_list, owner, load_addr);
@@ -1789,6 +1789,7 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &owner,
           }
         }
       }
+    }
   }
   // We failed to enable the breakpoint
   return LLDB_INVALID_BREAK_ID;

@@ -19,6 +19,8 @@ public:
   virtual lldb::addr_t FixCodeAddress(lldb::addr_t pc) override;
   virtual lldb::addr_t FixDataAddress(lldb::addr_t pc) override;
 
+  llvm::Expected<OpcodeArray> GetDebugTrapOpcode() override;
+
 protected:
   virtual lldb::addr_t FixAddress(lldb::addr_t pc, lldb::addr_t mask) {
     return pc;
