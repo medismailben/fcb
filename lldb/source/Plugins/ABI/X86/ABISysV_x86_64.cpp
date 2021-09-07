@@ -64,6 +64,21 @@ bool ABISysV_x86_64::GetPointerReturnRegister(const char *&name) {
   return true;
 }
 
+bool ABISysV_x86_64::GetFramePointerRegister(const char *&name) {
+  name = "rbp";
+  return true;
+}
+
+llvm::Expected<ABISysV_x86_64::OpcodeArray>
+ABISysV_x86_64::GetDebugTrapOpcode() {
+  static const llvm::SmallVector<uint8_t, 8> g_aarch64_opcode[] = {
+      {0xCC},       // int3 = 0xCC
+      {0x0B, 0x0F}, // ud2 = 0x0f0b
+  };
+
+  return llvm::makeArrayRef(g_aarch64_opcode);
+}
+
 bool ABISysV_x86_64::SetupFastConditionalBreakpointTrampoline(
     size_t instrs_size, uint8_t *instrs_data,
     BreakpointInjectedSite *bp_injected_site) {

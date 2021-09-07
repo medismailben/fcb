@@ -76,7 +76,7 @@ lldb::ModuleSP ABI::CreateModuleForFastConditionalBreakpointTrampoline(
     lldb::addr_t address, std::size_t size, lldb::addr_t return_address) {
   Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_JIT_LOADER));
 
-  if (!ImplementsJIT()) {
+  if (!SupportsFCB()) {
     LLDB_LOG(log, "JIT: ABI {} does not implement JIT-ed breakpoint condition",
              GetPluginName().AsCString());
     return nullptr;

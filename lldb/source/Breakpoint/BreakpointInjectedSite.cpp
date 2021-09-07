@@ -184,6 +184,7 @@ bool BreakpointInjectedSite::BuildConditionExpression(void) {
 bool BreakpointInjectedSite::ResolveTrapAddress(void *jit, size_t size) {
   Log *log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_JIT_LOADER);
 
+  const ABISP abi_sp = m_target_sp->GetProcessSP()->GetABI();
   const ArchSpec &arch = m_target_sp->GetArchitecture();
   const char *plugin_name = nullptr;
   const char *flavor = nullptr;
@@ -205,24 +206,37 @@ bool BreakpointInjectedSite::ResolveTrapAddress(void *jit, size_t size) {
     return false;
   }
 
+  auto abi_debug_trap_opcode = abi_sp->GetDebugTrapOpcode();
+
   for (size_t i = 0; i < instructions.GetSize(); i++) {
     InstructionSP instr = instructions.GetInstructionAtIndex(i);
-    const void *instr_opcode = instr->GetOpcode().GetOpcodeDataBytes();
 
     DataExtractor data;
     instr->GetData(data);
 
     const size_t trap_size = instr->Decode(*m_disassembler_sp.get(), data, 0);
 
+    const void *instr_opcode = instr->GetOpcode().GetOpcodeDataBytes();
+
     if (!instr_opcode) {
       return false;
     }
 
-    if (!memcmp(instr_opcode, m_trap_opcode, trap_size)) {
-      addr_t addr = instr->GetAddress().GetOpcodeLoadAddress(m_target_sp.get());
-      m_trap_addr = addr;
-      LLDB_LOGV(log, "Injected trap address: {0:X+}", addr);
-      return true;
+    if (!abi_debug_trap_opcode) {
+      LLDB_LOG(log, "FCB: No ABI debug_trap opcode found.");
+      return false;
+    }
+
+    // Within a same platform, the compiler can generate different opcodes for
+    // the same debug trap builtin. https://reviews.llvm.org/D84014
+    for (auto &abi_trap_code : *abi_debug_trap_opcode) {
+      if (!memcmp(instr_opcode, abi_trap_code.data(), trap_size)) {
+        addr_t addr =
+            instr->GetAddress().GetOpcodeLoadAddress(m_target_sp.get());
+        m_trap_addr = addr;
+        LLDB_LOGV(log, "Injected trap address: {0:X+}", addr);
+        return true;
+      }
     }
   }
   return false;
@@ -393,6 +407,7 @@ bool BreakpointInjectedSite::CreateArgumentsStructure() {
 std::string BreakpointInjectedSite::ParseDWARFExpression(size_t index,
                                                          Status &error) {
   std::string expr;
+  ABISP abi_sp = m_owner_exe_ctx.GetProcessSP()->GetABI();
 
   for (auto op : m_metadatas[index].dwarf) {
     switch (op.getCode()) {
@@ -408,7 +423,10 @@ std::string BreakpointInjectedSite::ParseDWARFExpression(size_t index,
     }
     case llvm::dwarf::DW_OP_fbreg: {
       int64_t operand = op.getRawOperand(0);
-      expr += "   src_addr = (void*) (regs->rbp + " + std::to_string(operand) +
+      const char *frame_ptr;
+      abi_sp->GetFramePointerRegister(frame_ptr);
+      expr += "   src_addr = (void*) (regs->" + std::string(frame_ptr) + " + " +
+              std::to_string(operand) +
               ");\n"
               "   dst_addr = (void*) (arg_struct + " +
               std::to_string(index * 8) +
@@ -418,7 +436,7 @@ std::string BreakpointInjectedSite::ParseDWARFExpression(size_t index,
     }
     default: {
       error.Clear();
-      error.SetErrorToErrno();
+      //      error.SetErrorToErrno();
       break;
     }
     }
