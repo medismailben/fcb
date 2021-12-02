@@ -41,14 +41,12 @@ bool ABIMacOSX_arm64::GetFramePointerRegister(const char *&name) {
 }
 
 // TODO: Implement for ARM
-// https://github.com/apple/darwin-xnu/blob/main/osfmk/arm64/cswitch.s
-// https://github.com/RTEMS/rtems/blob/master/cpukit/score/cpu/aarch64/cpu_asm.S
 bool ABIMacOSX_arm64::SetupFastConditionalBreakpointTrampoline(
     size_t instrs_size, uint8_t *instrs_data,
     BreakpointInjectedSite *bp_injected_site) {
   Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_JIT_LOADER));
 
-  lldb::addr_t jmp_addr = bp_injected_site->GetLoadAddress();
+  lldb::addr_t origin_addr = bp_injected_site->GetLoadAddress();
 
   const lldb::addr_t cond_expr_addr =
       bp_injected_site->GetConditionExpressionAddress();
@@ -57,40 +55,34 @@ bool ABIMacOSX_arm64::SetupFastConditionalBreakpointTrampoline(
 
   ProcessSP process_sp = m_process_wp.lock();
 
-  // Copy saved instructions to the inferior memory buffer.
+  /// Saving General Purpose Registers.
+  size_t expected_trampoline_size = aarch64_instr_size * 18;
+  /// Pass register context address to argument structure builder.
+  expected_trampoline_size += aarch64_instr_size * 1;
+  /// Allocating argument structure on the stack.
+  expected_trampoline_size += aarch64_instr_size * 1;
+  /// Pass argument structure address to argument structure builder.
+  expected_trampoline_size += aarch64_instr_size * 1;
+  /// Call argument structure builder.
+  expected_trampoline_size += aarch64_instr_size * 2;
+  /// Pass returned argument structure to condition expression evaluator.
+  expected_trampoline_size += aarch64_instr_size * 1;
+  /// Call condition expression evaluator.
+  expected_trampoline_size += aarch64_instr_size * 2;
+  /// Restore General Purpose Registers.
+  expected_trampoline_size += aarch64_instr_size * 18;
+  /// Run copied instructions.
+  expected_trampoline_size += aarch64_instr_size * 1;
+//  /// Jump back to user's code.
+//  expected_trampoline_size += aarch64_instr_size * 1;
+  
   Status error;
   uint8_t alignment = 16;
   uint32_t permission =
-      ePermissionsReadable | ePermissionsWritable | ePermissionsExecutable;
+      ePermissionsReadable | ePermissionsExecutable;
   IRMemoryMap::AllocationPolicy policy = IRMemoryMap::eAllocationPolicyMirror;
 
   IRMemoryMap memory_map(process_sp->GetTarget().shared_from_this());
-
-  size_t context_size =
-      aarch64_saved_register_size + aarch64_volatile_register_size;
-
-  /// Saving General Purpose Registers.
-  size_t expected_trampoline_size = context_size;
-  /// Pass register context address to argument structure builder.
-  expected_trampoline_size += aarch64_instr_size;
-  /// Allocating argument structure on the stack.
-  expected_trampoline_size += aarch64_instr_size;
-  /// Pass argument structure address to argument structure builder.
-  expected_trampoline_size += aarch64_instr_size;
-  /// Call argument structure builder.
-  expected_trampoline_size += aarch64_instr_size;
-  /// Pass returned argument structure to condition expression evaluator.
-  expected_trampoline_size += aarch64_instr_size;
-  /// Call condition expression evaluator.
-  expected_trampoline_size += aarch64_instr_size;
-  /// Re-Align stack pointer
-  expected_trampoline_size += aarch64_instr_size;
-  /// Restore General Purpose Registers.
-  expected_trampoline_size += context_size;
-  /// Run copied instructions.
-  expected_trampoline_size += instrs_size;
-  /// Jump back to user's code.
-  expected_trampoline_size += aarch64_instr_size;
 
   addr_t trampoline_addr = memory_map.Malloc(
       expected_trampoline_size, alignment, permission, policy, true, error);
@@ -99,151 +91,105 @@ bool ABIMacOSX_arm64::SetupFastConditionalBreakpointTrampoline(
     LLDB_LOG(log, "JIT: Couldn't allocate trampoline buffer");
     return LLDB_INVALID_ADDRESS;
   }
+  
+  std::vector<uint8_t> asm_bytes;
+  auto asm_repl = [&bp_injected_site, &asm_bytes](llvm::StringRef asm_string) {
+    return bp_injected_site->AssembleInput(asm_string, asm_bytes);
+  };
+  
+  if (asm_repl(GetCSSaveRegistersAssembly()).Fail())
+    return false;
+  
+  llvm::StringRef move_stack_ptr_to_arg0 = "mov x0, sp";
+  if (asm_repl(move_stack_ptr_to_arg0).Fail())
+    return false;
+  
+  std::string allocate_arg_struct_on_stack = "sub sp, sp, #";
+  allocate_arg_struct_on_stack += std::to_string(bp_injected_site->GetVariableCount());
+  if (asm_repl(allocate_arg_struct_on_stack).Fail())
+    return false;
+  
+  llvm::StringRef move_stack_ptr_to_arg1 = "mov x1, sp";
+  if (asm_repl(move_stack_ptr_to_arg1).Fail())
+    return false;
+  
+  std::string call_arg_struct = "ldr x4, ";
+  int32_t call_offset = -GetJumpSize() - asm_bytes.size() - trampoline_addr + util_func_addr;
+  call_arg_struct += std::to_string(call_offset);
+  call_arg_struct += "\n";
+  call_arg_struct += "blr x4";
+  if (asm_repl(call_arg_struct).Fail())
+    return false;
 
-  size_t trampoline_size = 0;
-
-  uint8_t trampoline_buffer[expected_trampoline_size];
-
-  uint8_t regs_ctx[context_size];
-  /// Saving General Purpose Registers.
-  for (size_t i = 0; i < 8; i++)
-    regs_ctx[i] = aarch64_push_opcode + i;
-  for (size_t i = 0; i < 8; i++) {
-    size_t offset = aarch64_volatile_register_size + 2 * i;
-    regs_ctx[offset] = aarch64_rexb_opcode;
-    regs_ctx[offset + 1] = aarch64_push_opcode + i;
-  }
-  std::memcpy(trampoline_buffer, &regs_ctx, context_size);
-  trampoline_size += context_size;
-
-  /// Pass register context address to argument structure builder.
-  uint8_t mov_buffer[aarch64_mov_size];
-  mov_buffer[0] = aarch64_rexw_opcode;
-  mov_buffer[1] = aarch64_mov_opcode;
-  mov_buffer[2] = aarch64_rsp_rdi_sib_byte; // mov rsp, rdi
-  std::memcpy(&trampoline_buffer[trampoline_size], &mov_buffer,
-              aarch64_mov_size);
-  trampoline_size += aarch64_mov_size;
-
-  size_t variable_count = bp_injected_site->GetVariableCount();
-  size_t address_size_in_byte =
-      bp_injected_site->GetTargetSP()->GetArchitecture().GetAddressByteSize();
-
-  /// Allocating argument structure on the stack.
-  uint8_t sub_buffer[aarch64_sub_size];
-  sub_buffer[0] = aarch64_rexw_opcode;
-  sub_buffer[1] = aarch64_sub_opcode;
-  sub_buffer[2] = aarch64_sub_byte;
-  sub_buffer[3] = variable_count * address_size_in_byte;
-  std::memcpy(&trampoline_buffer[trampoline_size], &sub_buffer,
-              aarch64_sub_size);
-  trampoline_size += aarch64_sub_size;
-
-  /// Pass register context address to argument structure builder.
-  mov_buffer[0] = aarch64_rexw_opcode;
-  mov_buffer[1] = aarch64_mov_opcode;
-  mov_buffer[2] = aarch64_rsp_rsi_sib_byte; // mov rsp, rsi
-  std::memcpy(&trampoline_buffer[trampoline_size], &mov_buffer,
-              aarch64_mov_size);
-  trampoline_size += aarch64_mov_size;
-
-  /// Call argument structure builder.
-  uint8_t call_buffer[aarch64_call_size];
-  uint32_t call_offset =
-      -aarch64_call_size - trampoline_size - trampoline_addr + util_func_addr;
-  call_buffer[0] = aarch64_call_opcode;
-  std::memcpy(&call_buffer[1], &call_offset, sizeof(uint32_t));
-  std::memcpy(&trampoline_buffer[trampoline_size], call_buffer,
-              aarch64_call_size);
-  trampoline_size += aarch64_call_size;
-
-  /// Pass returned argument structure to condition expression evaluator.
-  mov_buffer[2] = aarch64_rax_rdi_sib_byte; // mov rax, rdi
-  std::memcpy(&trampoline_buffer[trampoline_size], &mov_buffer,
-              aarch64_mov_size);
-  trampoline_size += aarch64_mov_size;
-
-  /// Call condition expression evaluator.
+  llvm::StringRef move_arg_struct_to_arg0 = "mov x0, x8";
+  if (asm_repl(move_arg_struct_to_arg0).Fail())
+    return false;
+  
+  std::string call_condition_eval = "ldr x4, #";
   call_offset =
-      -aarch64_call_size - trampoline_size - trampoline_addr + cond_expr_addr;
-  call_buffer[0] = aarch64_call_opcode;
-  std::memcpy(&call_buffer[1], &call_offset, sizeof(uint32_t));
-  std::memcpy(&trampoline_buffer[trampoline_size], call_buffer,
-              aarch64_call_size);
-  trampoline_size += aarch64_call_size;
-
-  /// Re-Align stack pointer
-  uint8_t add_buffer[aarch64_add_size];
-  add_buffer[0] = aarch64_rexw_opcode;
-  add_buffer[1] = aarch64_add_opcode;
-  add_buffer[2] = aarch64_add_byte;
-  add_buffer[3] = variable_count * address_size_in_byte;
-  std::memcpy(&trampoline_buffer[trampoline_size], &add_buffer,
-              aarch64_sub_size);
-  trampoline_size += aarch64_add_size;
-
-  /// Restore General Purpose Registers.
-  for (size_t i = 0; i < 8; i++) {
-    regs_ctx[2 * i] = aarch64_rexb_opcode;
-    regs_ctx[2 * i + 1] =
-        aarch64_pop_opcode + aarch64_volatile_register_size - i - 1;
-  }
-  for (size_t i = 0; i < 8; i++)
-    regs_ctx[aarch64_saved_register_size + i] =
-        aarch64_pop_opcode + aarch64_volatile_register_size - i - 1;
-  std::memcpy(&trampoline_buffer[trampoline_size], &regs_ctx, context_size);
-  trampoline_size += context_size;
-
-  /// Run copied instructions.
-  std::memcpy(&trampoline_buffer[trampoline_size], instrs_data, instrs_size);
-  trampoline_size += instrs_size;
-
-  /// Jump back to user's code.
-  uint8_t jmp_buffer[aarch64_jmp_size];
-  uint32_t jmp_offset = jmp_addr - trampoline_addr - trampoline_size;
-
-  jmp_buffer[0] = aarch64_jmp_opcode;
-  std::memcpy(&jmp_buffer[1], &jmp_offset, sizeof(uint32_t));
-  std::memcpy(&trampoline_buffer[trampoline_size], jmp_buffer,
-              aarch64_jmp_size);
-  trampoline_size += aarch64_jmp_size;
-
-  if (trampoline_size != expected_trampoline_size) {
+  -GetJumpSize() - asm_bytes.size() - trampoline_addr + cond_expr_addr;
+  call_condition_eval += std::to_string(call_offset);
+  call_condition_eval += "\n";
+  call_condition_eval += "blr x4";
+  if (asm_repl(call_condition_eval).Fail())
+    return false;
+  
+  if (asm_repl(GetCSLoadRegistersAssembly()).Fail())
+    return false;
+  
+  for (size_t i = 0; i < instrs_size; i++)
+    asm_bytes.push_back(instrs_data[i]);
+  
+  lldb::addr_t jmp_addr = bp_injected_site->GetLoadAddress();
+  
+//  std::string leave_trampoline = "ldr x4, #";
+//  int32_t jmp_offset = jmp_addr - trampoline_addr - asm_bytes.size();
+//  leave_trampoline += std::to_string(jmp_offset);
+//  leave_trampoline += "\n";
+//  leave_trampoline += "br x4";
+//  if (asm_repl(leave_trampoline).Fail())
+//    return false;
+  
+  if (asm_bytes.size() != expected_trampoline_size) {
     LLDB_LOG(
         log,
         "JIT: Trampoline size ({0} bytes) is not the one expected ({1} bytes)",
-        trampoline_size, expected_trampoline_size);
+             asm_bytes.size(), expected_trampoline_size);
     return false;
   }
 
   size_t written_bytes = process_sp->WriteMemory(
-      trampoline_addr, &trampoline_buffer, trampoline_size, error);
+                                                 trampoline_addr, asm_bytes.data(), asm_bytes.size(), error);
 
-  if (written_bytes != trampoline_size || error.Fail()) {
+  if (written_bytes != asm_bytes.size() || error.Fail()) {
     LLDB_LOG(log, "JIT: Couldn't write trampoline buffer to inferior");
     return false;
   }
-
+  
+  asm_bytes.clear();
+  
   // Overwrite current instruction with JMP.
-  jmp_offset = trampoline_addr - jmp_addr - aarch64_jmp_size;
-
-  jmp_buffer[0] = aarch64_jmp_opcode;
-  std::memcpy(&jmp_buffer[1], &jmp_offset, sizeof(uint32_t));
-
-  for (size_t i = 0; i < aarch64_jmp_size; i++)
-    LLDB_LOGV(log, "0x{:x}", jmp_buffer[i]);
+  
+  std::string jump_to_trampoline = "ldr x4, #";
+  int32_t ret_addr = trampoline_addr;
+  jump_to_trampoline += std::to_string(ret_addr);
+  jump_to_trampoline += "\n";
+  
+  jump_to_trampoline += "br x4";
+  if (asm_repl(jump_to_trampoline).Fail())
+    return false;
 
   written_bytes =
-      process_sp->WriteMemory(jmp_addr, jmp_buffer, aarch64_jmp_size, error);
+      process_sp->WriteMemory(origin_addr, asm_bytes.data(), GetJumpSize(), error);
 
-  if (written_bytes != aarch64_jmp_size || error.Fail()) {
+  if (written_bytes != GetJumpSize() || error.Fail()) {
     LLDB_LOG(log, "JIT: Couldn't override instruction with branching");
     return false;
   }
 
   lldb::ModuleSP trampoline_module_sp =
       CreateModuleForFastConditionalBreakpointTrampoline(
-          trampoline_addr, trampoline_size, jmp_addr);
+                                                         trampoline_addr, asm_bytes.size(), origin_addr);
 
   if (!trampoline_module_sp) {
     LLDB_LOG(log, "JIT: Couldn't get trampoline module");
@@ -261,7 +207,7 @@ bool ABIMacOSX_arm64::SetupFastConditionalBreakpointTrampoline(
     return false;
   }
 
-  jmp_addr = trampoline_addr;
+  origin_addr = trampoline_addr;
 
   return true;
 }

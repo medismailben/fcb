@@ -141,6 +141,8 @@ public:
 
   virtual bool GetPointerReturnRegister(const char *&name) { return false; }
   virtual bool GetFramePointerRegister(const char *&name) { return false; }
+  
+  
 
   /// Allocate a memory stub for the fast condition breakpoint trampoline, and
   /// build it by saving the register context, calling the argument structure
@@ -176,6 +178,8 @@ public:
 
   virtual size_t GetJumpSize() { return 0; }
 
+  virtual llvm::StringRef GetCSSaveRegistersAssembly() { return ""; }
+  virtual llvm::StringRef GetCSLoadRegistersAssembly() { return ""; }
   virtual llvm::StringRef GetRegisterContextAsString() { return ""; }
 
   virtual llvm::StringRef GetMachTypesAsString() { return ""; }

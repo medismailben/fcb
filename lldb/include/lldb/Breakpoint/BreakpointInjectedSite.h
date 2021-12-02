@@ -72,6 +72,8 @@ public:
   lldb::addr_t GetTrapAddress() {
     return m_trap_addr.GetLoadAddress(m_target_sp.get());
   }
+  
+  Status AssembleInput(llvm::StringRef asm_string, std::vector<uint8_t>& asm_bytes);
 
   lldb::TargetSP GetTargetSP() { return m_target_sp; }
 

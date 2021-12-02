@@ -15,7 +15,22 @@
 
 #include "lldb/Target/ABI.h"
 
+#include "llvm/MC/MCAsmBackend.h"
+#include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCCodeEmitter.h"
+#include "llvm/MC/MCContext.h"
+#include "llvm/MC/MCInstPrinter.h"
+#include "llvm/MC/MCInstrInfo.h"
+#include "llvm/MC/MCParser/MCAsmParser.h"
+#include "llvm/MC/MCParser/MCTargetAsmParser.h"
+#include "llvm/MC/MCStreamer.h"
+#include "llvm/MC/MCTargetOptionsCommandFlags.h"
+
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/DataExtractor.h"
+#include "llvm/Support/FormattedStream.h"
+#include "llvm/Support/SourceMgr.h"
+#include "llvm/Support/TargetRegistry.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -443,4 +458,119 @@ std::string BreakpointInjectedSite::ParseDWARFExpression(size_t index,
   }
 
   return expr;
+}
+
+Status BreakpointInjectedSite::AssembleInput(llvm::StringRef asm_string, std::vector<uint8_t>& asm_bytes) {
+  lldb::TargetSP target_sp = GetTargetSP();
+  const ArchSpec& arch_spec = target_sp->GetArchitecture();
+  const std::string& triple_name = arch_spec.GetTriple().getTriple();
+  
+  // Get the target specific parser.
+  std::string error;
+  const llvm::Target *llvmTarget = llvm::TargetRegistry::lookupTarget(triple_name, error);
+
+  std::unique_ptr<llvm::MemoryBuffer> buffer_ptr = llvm::MemoryBuffer::getMemBuffer(asm_string, "<inline asm>");
+  
+  llvm::SourceMgr SrcMgr;
+  SrcMgr.AddNewSourceBuffer(std::move(buffer_ptr), llvm::SMLoc());
+
+  std::unique_ptr<llvm::MCRegisterInfo> MRI(llvmTarget->createMCRegInfo(triple_name));
+  assert(MRI && "Unable to create target register info!");
+
+  static llvm::mc::RegisterMCTargetOptionsFlags MOF;
+  const llvm::MCTargetOptions MCOptions = llvm::mc::InitMCTargetOptionsFromFlags();
+  
+  std::unique_ptr<llvm::MCAsmInfo> MAI(
+                                       llvmTarget->createMCAsmInfo(*MRI, triple_name, MCOptions));
+  assert(MAI && "Unable to create target asm info!");
+
+  std::unique_ptr<llvm::MCSubtargetInfo> STI(
+      llvmTarget->createMCSubtargetInfo(triple_name, "", ""));
+  assert(STI && "Unable to create subtarget info!");
+  
+  
+  llvm::MCContext Ctx(arch_spec.GetTriple(), MAI.get(), MRI.get(), STI.get(), &SrcMgr,
+                &MCOptions);
+  std::unique_ptr<llvm::MCObjectFileInfo> MOFI(
+      llvmTarget->createMCObjectFileInfo(Ctx, false, false));
+  Ctx.setObjectFileInfo(MOFI.get());
+  
+  std::unique_ptr<llvm::MCInstrInfo> MCII(llvmTarget->createMCInstrInfo());
+  assert(MCII && "Unable to create instruction info!");
+  
+    
+  // Set up the AsmStreamer.
+  std::unique_ptr<llvm::MCCodeEmitter> CE(llvmTarget->createMCCodeEmitter(*MCII, *MRI, Ctx));
+
+  std::unique_ptr<llvm::MCAsmBackend> MAB(
+      llvmTarget->createMCAsmBackend(*STI, *MRI, MCOptions));
+  
+  std::string stream_string;
+  llvm::raw_string_ostream OS(stream_string);
+  auto FOut = std::make_unique<llvm::formatted_raw_ostream>(OS);
+  
+  llvm::MCInstPrinter* IP = llvmTarget->createMCInstPrinter(arch_spec.GetTriple(), 0,
+                                      *MAI, *MCII, *MRI);
+  
+  std::unique_ptr<llvm::MCStreamer> Str(
+      llvmTarget->createAsmStreamer(Ctx, std::move(FOut), /*asmverbose*/ true,
+                                   /*useDwarfDirectory*/ true, IP,
+                                   std::move(CE), std::move(MAB), /*ShowInst*/ false));
+  
+  std::unique_ptr<llvm::MCAsmParser> Parser(createMCAsmParser(SrcMgr, Ctx, *Str,*MAI));
+  std::unique_ptr<llvm::MCTargetAsmParser> TAP(llvmTarget->createMCAsmParser(*STI, *Parser, *MCII, MCOptions));
+
+  if (!TAP) {
+    return Status();
+  }
+
+  Parser->setShowParsedOperands(false);
+  Parser->setTargetParser(*TAP);
+  Parser->getLexer().setLexMasmIntegers(false);
+  Parser->getLexer().setLexMasmHexFloats(false);
+  Parser->getLexer().setLexMotorolaIntegers(false);
+  
+  int Res = Parser->Run(false);
+  
+  if (Res)
+    return Status(Res);
+  
+  // Break output into lines
+  
+  auto split = [](std::string& str, char delimiter) {
+    std::vector<std::string> lines;
+    std::string line;
+    
+    std::istringstream iss(str);
+    while (std::getline(iss, line, delimiter))
+    {
+      if (!line.empty())
+        lines.push_back(line);
+    }
+    
+    return lines;
+  };
+  
+  std::vector<std::string> asm_lines = split(stream_string, '\n');
+  
+  if (!asm_lines.size())
+    return Status(Res);
+  
+  for (auto& asm_line : asm_lines) {
+    size_t begin = asm_line.find_last_of('[');
+    size_t end = asm_line.find_last_of(']');
+    if (begin == std::string::npos || end == std::string::npos)
+      continue;
+  
+    std::string encoding_arr = asm_line.substr(begin+1, end - begin - 1);
+    if (encoding_arr.empty())
+      continue;
+    
+    std::vector<std::string> encoding_bytes = split(encoding_arr, ',');
+    for (auto& byte : encoding_bytes) {
+      asm_bytes.push_back(std::stoi(byte, 0, 16));
+    }
+  }
+  
+  return Status();
 }

@@ -27,10 +27,57 @@ public:
   static constexpr const std::size_t aarch64_instr_size = 4;
   static constexpr const std::size_t aarch64_saved_register_size = 24;
   static constexpr const std::size_t aarch64_volatile_register_size = 8;
+  
+  
+  // https://github.com/apple/darwin-xnu/blob/main/osfmk/arm64/cswitch.s
+  // https://github.com/RTEMS/rtems/blob/master/cpukit/score/cpu/aarch64/cpu_asm.S
+  /// STP X0, X1, [SP, #-16]! ; Push X0 and X1 onto the stack
+  /// LDP X0, X1, [SP], #16 ; Pop X0 and X1 from the stack
+  static constexpr const char* cs_save_registers = R"(
+                                                      str x0,  [x0]
+                                                      stp x1, x2, [x0, #0x10]
+                                                      stp x3, x4, [x0, #0x20]
+                                                      stp x5, x6, [x0, #0x30]
+                                                      stp x7, x8, [x0, #0x40]
+                                                      stp x9, x10, [x0, #0x50]
+                                                      stp x11, x12, [x0, #0x60]
+                                                      stp x13, x14, [x0, #0x70]
+                                                      stp x15, x16, [x0, #0x80]
+                                                      stp x17, x18, [x0, #0x90]
+                                                      stp x19, x20, [x0, #0x100]
+                                                      stp x21, x22, [x0, #0x110]
+                                                      stp x23, x24, [x0, #0x120]
+                                                      stp x25, x26, [x0, #0x130]
+                                                      stp x27, x28, [x0, #0x140]
+                                                      stp fp,  lr,  [x0, #0x150]
+                                                      mov x4,  sp
+                                                      str x4,  [x0, #0x160])";
+  
+  static constexpr const char* cs_load_registers = R"(
+                                                      ldr x0,  [x1]
+                                                      ldp x1, x2, [x1, #0x10]
+                                                      ldp x3, x4, [x1, #0x20]
+                                                      ldp x5, x6, [x1, #0x30]
+                                                      ldp x7, x8, [x1, #0x40]
+                                                      ldp x9, x10, [x1, #0x50]
+                                                      ldp x11, x12, [x1, #0x60]
+                                                      ldp x13, x14, [x1, #0x70]
+                                                      ldp x15, x16, [x1, #0x80]
+                                                      ldp x17, x18, [x1, #0x90]
+                                                      ldp x19, x20, [x1, #0x100]
+                                                      ldp x21, x22, [x1, #0x110]
+                                                      ldp x23, x24, [x1, #0x120]
+                                                      ldp x25, x26, [x1, #0x130]
+                                                      ldp x27, x28, [x1, #0x140]
+                                                      ldp fp,  lr,  [x1, #0x150]
+                                                      ldr x4,  [x1, #0x160]
+                                                      mov sp,  x4)";
+  
+  llvm::StringRef GetCSSaveRegistersAssembly() override { return cs_save_registers; }
+  
+  llvm::StringRef GetCSLoadRegistersAssembly() override { return cs_load_registers; }
 
   static constexpr const char *register_context = R"(typedef struct {
-                                                      intptr_t cpsr;
-                                                      intptr_t pc;
                                                       intptr_t sp;
                                                       intptr_t lr;
                                                       intptr_t fp;
@@ -143,8 +190,9 @@ public:
   bool SetupFastConditionalBreakpointTrampoline(
       size_t instrs_size, uint8_t *instrs_data,
       lldb_private::BreakpointInjectedSite *bp_inject_site) override;
+  
 
-  size_t GetJumpSize() override { return aarch64_jmp_size; }
+  size_t GetJumpSize() override { return aarch64_instr_size; }
 
   llvm::StringRef GetRegisterContextAsString() override {
     return register_context;
