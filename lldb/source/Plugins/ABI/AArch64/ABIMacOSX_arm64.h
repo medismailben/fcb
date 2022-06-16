@@ -144,7 +144,7 @@ public:
       size_t instrs_size, uint8_t *instrs_data,
       lldb_private::BreakpointInjectedSite *bp_inject_site) override;
 
-  size_t GetJumpSize() override { return aarch64_jmp_size; }
+  size_t GetJumpSize() override { return aarch64_instr_size; }
 
   llvm::StringRef GetRegisterContextAsString() override {
     return register_context;

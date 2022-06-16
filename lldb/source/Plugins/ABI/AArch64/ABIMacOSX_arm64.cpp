@@ -68,7 +68,7 @@ bool ABIMacOSX_arm64::SetupFastConditionalBreakpointTrampoline(
   IRMemoryMap memory_map(process_sp->GetTarget().shared_from_this());
 
   size_t context_size =
-      aarch64_saved_register_size + aarch64_volatile_register_size;
+      aarch64_instr_size;
 
   /// Saving General Purpose Registers.
   size_t expected_trampoline_size = context_size;
@@ -110,88 +110,88 @@ bool ABIMacOSX_arm64::SetupFastConditionalBreakpointTrampoline(
   for (size_t i = 0; i < 8; i++)
     regs_ctx[i] = aarch64_push_opcode + i;
   for (size_t i = 0; i < 8; i++) {
-    size_t offset = aarch64_volatile_register_size + 2 * i;
-    regs_ctx[offset] = aarch64_rexb_opcode;
+    size_t offset = aarch64_instr_size + 2 * i;
+    // regs_ctx[offset] = aarch64_rexb_opcode;
     regs_ctx[offset + 1] = aarch64_push_opcode + i;
   }
   std::memcpy(trampoline_buffer, &regs_ctx, context_size);
   trampoline_size += context_size;
 
   /// Pass register context address to argument structure builder.
-  uint8_t mov_buffer[aarch64_mov_size];
-  mov_buffer[0] = aarch64_rexw_opcode;
-  mov_buffer[1] = aarch64_mov_opcode;
-  mov_buffer[2] = aarch64_rsp_rdi_sib_byte; // mov rsp, rdi
+  uint8_t mov_buffer[aarch64_instr_size];
+  // mov_buffer[0] = aarch64_rexw_opcode;
+  // mov_buffer[1] = aarch64_mov_opcode;
+  // mov_buffer[2] = aarch64_rsp_rdi_sib_byte; // mov rsp, rdi
   std::memcpy(&trampoline_buffer[trampoline_size], &mov_buffer,
-              aarch64_mov_size);
-  trampoline_size += aarch64_mov_size;
+              aarch64_instr_size);
+  trampoline_size += aarch64_instr_size;
 
   size_t variable_count = bp_injected_site->GetVariableCount();
   size_t address_size_in_byte =
       bp_injected_site->GetTargetSP()->GetArchitecture().GetAddressByteSize();
 
   /// Allocating argument structure on the stack.
-  uint8_t sub_buffer[aarch64_sub_size];
-  sub_buffer[0] = aarch64_rexw_opcode;
-  sub_buffer[1] = aarch64_sub_opcode;
-  sub_buffer[2] = aarch64_sub_byte;
-  sub_buffer[3] = variable_count * address_size_in_byte;
+  uint8_t sub_buffer[aarch64_instr_size];
+  // sub_buffer[0] = aarch64_rexw_opcode;
+  // sub_buffer[1] = aarch64_sub_opcode;
+  // sub_buffer[2] = aarch64_sub_byte;
+  // sub_buffer[3] = variable_count * address_size_in_byte;
   std::memcpy(&trampoline_buffer[trampoline_size], &sub_buffer,
-              aarch64_sub_size);
-  trampoline_size += aarch64_sub_size;
+              aarch64_instr_size);
+  trampoline_size += aarch64_instr_size;
 
   /// Pass register context address to argument structure builder.
-  mov_buffer[0] = aarch64_rexw_opcode;
-  mov_buffer[1] = aarch64_mov_opcode;
-  mov_buffer[2] = aarch64_rsp_rsi_sib_byte; // mov rsp, rsi
+  // mov_buffer[0] = aarch64_rexw_opcode;
+  // mov_buffer[1] = aarch64_mov_opcode;
+  // mov_buffer[2] = aarch64_rsp_rsi_sib_byte; // mov rsp, rsi
   std::memcpy(&trampoline_buffer[trampoline_size], &mov_buffer,
-              aarch64_mov_size);
-  trampoline_size += aarch64_mov_size;
+              aarch64_instr_size);
+  trampoline_size += aarch64_instr_size;
 
   /// Call argument structure builder.
-  uint8_t call_buffer[aarch64_call_size];
+  uint8_t call_buffer[aarch64_instr_size];
   uint32_t call_offset =
-      -aarch64_call_size - trampoline_size - trampoline_addr + util_func_addr;
+      -aarch64_instr_size - trampoline_addr + util_func_addr;
   call_buffer[0] = aarch64_call_opcode;
   std::memcpy(&call_buffer[1], &call_offset, sizeof(uint32_t));
   std::memcpy(&trampoline_buffer[trampoline_size], call_buffer,
-              aarch64_call_size);
-  trampoline_size += aarch64_call_size;
+              aarch64_instr_size);
+  trampoline_size += aarch64_instr_size;
 
   /// Pass returned argument structure to condition expression evaluator.
-  mov_buffer[2] = aarch64_rax_rdi_sib_byte; // mov rax, rdi
+  // mov_buffer[2] = aarch64_rax_rdi_sib_byte; // mov rax, rdi
   std::memcpy(&trampoline_buffer[trampoline_size], &mov_buffer,
-              aarch64_mov_size);
-  trampoline_size += aarch64_mov_size;
+              aarch64_instr_size);
+  trampoline_size += aarch64_instr_size;
 
   /// Call condition expression evaluator.
   call_offset =
-      -aarch64_call_size - trampoline_size - trampoline_addr + cond_expr_addr;
+      -aarch64_instr_size - trampoline_addr + cond_expr_addr;
   call_buffer[0] = aarch64_call_opcode;
   std::memcpy(&call_buffer[1], &call_offset, sizeof(uint32_t));
   std::memcpy(&trampoline_buffer[trampoline_size], call_buffer,
-              aarch64_call_size);
-  trampoline_size += aarch64_call_size;
+              aarch64_instr_size);
+  trampoline_size += aarch64_instr_size;
 
   /// Re-Align stack pointer
-  uint8_t add_buffer[aarch64_add_size];
-  add_buffer[0] = aarch64_rexw_opcode;
-  add_buffer[1] = aarch64_add_opcode;
-  add_buffer[2] = aarch64_add_byte;
-  add_buffer[3] = variable_count * address_size_in_byte;
+  uint8_t add_buffer[aarch64_instr_size];
+  // add_buffer[0] = aarch64_rexw_opcode;
+  // add_buffer[1] = aarch64_add_opcode;
+  // add_buffer[2] = aarch64_add_byte;
+  // add_buffer[3] = variable_count * address_size_in_byte;
   std::memcpy(&trampoline_buffer[trampoline_size], &add_buffer,
-              aarch64_sub_size);
-  trampoline_size += aarch64_add_size;
+              aarch64_instr_size);
+  trampoline_size += aarch64_instr_size;
 
   /// Restore General Purpose Registers.
   for (size_t i = 0; i < 8; i++) {
-    regs_ctx[2 * i] = aarch64_rexb_opcode;
-    regs_ctx[2 * i + 1] =
-        aarch64_pop_opcode + aarch64_volatile_register_size - i - 1;
+    // regs_ctx[2 * i] = aarch64_rexb_opcode;
+    // regs_ctx[2 * i + 1] =
+    //     aarch64_instr_size - i - 1;
   }
   for (size_t i = 0; i < 8; i++)
-    regs_ctx[aarch64_saved_register_size + i] =
-        aarch64_pop_opcode + aarch64_volatile_register_size - i - 1;
+    regs_ctx[aarch64_instr_size + i] =
+        aarch64_instr_size - i - 1;
   std::memcpy(&trampoline_buffer[trampoline_size], &regs_ctx, context_size);
   trampoline_size += context_size;
 
@@ -200,14 +200,14 @@ bool ABIMacOSX_arm64::SetupFastConditionalBreakpointTrampoline(
   trampoline_size += instrs_size;
 
   /// Jump back to user's code.
-  uint8_t jmp_buffer[aarch64_jmp_size];
+  uint8_t jmp_buffer[aarch64_instr_size];
   uint32_t jmp_offset = jmp_addr - trampoline_addr - trampoline_size;
 
   jmp_buffer[0] = aarch64_jmp_opcode;
   std::memcpy(&jmp_buffer[1], &jmp_offset, sizeof(uint32_t));
   std::memcpy(&trampoline_buffer[trampoline_size], jmp_buffer,
-              aarch64_jmp_size);
-  trampoline_size += aarch64_jmp_size;
+              aarch64_instr_size);
+  trampoline_size += aarch64_instr_size;
 
   if (trampoline_size != expected_trampoline_size) {
     LLDB_LOG(
@@ -226,18 +226,18 @@ bool ABIMacOSX_arm64::SetupFastConditionalBreakpointTrampoline(
   }
 
   // Overwrite current instruction with JMP.
-  jmp_offset = trampoline_addr - jmp_addr - aarch64_jmp_size;
+  jmp_offset = trampoline_addr - jmp_addr - aarch64_instr_size;
 
   jmp_buffer[0] = aarch64_jmp_opcode;
   std::memcpy(&jmp_buffer[1], &jmp_offset, sizeof(uint32_t));
 
-  for (size_t i = 0; i < aarch64_jmp_size; i++)
+  for (size_t i = 0; i < aarch64_instr_size; i++)
     LLDB_LOGV(log, "0x{:x}", jmp_buffer[i]);
 
   written_bytes =
-      process_sp->WriteMemory(jmp_addr, jmp_buffer, aarch64_jmp_size, error);
+      process_sp->WriteMemory(jmp_addr, jmp_buffer, aarch64_instr_size, error);
 
-  if (written_bytes != aarch64_jmp_size || error.Fail()) {
+  if (written_bytes != aarch64_instr_size || error.Fail()) {
     LLDB_LOG(log, "JIT: Couldn't override instruction with branching");
     return false;
   }
