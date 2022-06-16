@@ -21,33 +21,30 @@ using namespace lldb_private;
 LLDB_PLUGIN_DEFINE(ObjectFileTrampoline)
 
 void ObjectFileTrampoline::Initialize() {
-  PluginManager::RegisterPlugin(GetPluginNameStatic(),
-                                GetPluginDescriptionStatic(), CreateInstance,
-                                CreateMemoryInstance, GetModuleSpecifications);
+  PluginManager::RegisterPlugin(
+      GetPluginNameStatic(), GetPluginDescriptionStatic(), CreateInstance,
+      CreateMemoryInstance, GetModuleSpecifications);
 }
 
 void ObjectFileTrampoline::Terminate() {
   PluginManager::UnregisterPlugin(CreateInstance);
 }
 
-lldb_private::ConstString ObjectFileTrampoline::GetPluginNameStatic() {
-  static ConstString g_name("trampoline");
-  return g_name;
-}
-
 const char *ObjectFileTrampoline::GetPluginDescriptionStatic() {
   return "Jitted Conditional Breakpoint Trampoline code object file";
 }
 
-ObjectFile *ObjectFileTrampoline::CreateInstance(
-    const lldb::ModuleSP &module_sp, DataBufferSP &data_sp,
-    lldb::offset_t data_offset, const FileSpec *file,
-    lldb::offset_t file_offset, lldb::offset_t length) {
+ObjectFile *ObjectFileTrampoline::CreateInstance(const lldb::ModuleSP &module_sp,
+                                            DataBufferSP data_sp,
+                                            lldb::offset_t data_offset,
+                                            const FileSpec *file,
+                                            lldb::offset_t file_offset,
+                                            lldb::offset_t length) {
   return nullptr;
 }
 
 ObjectFile *ObjectFileTrampoline::CreateMemoryInstance(
-    const lldb::ModuleSP &module_sp, DataBufferSP &data_sp,
+    const lldb::ModuleSP &module_sp, WritableDataBufferSP data_sp,
     const ProcessSP &process_sp, lldb::addr_t header_addr) {
   return nullptr;
 }
@@ -56,8 +53,8 @@ size_t ObjectFileTrampoline::GetModuleSpecifications(
     const lldb_private::FileSpec &file, lldb::DataBufferSP &data_sp,
     lldb::offset_t data_offset, lldb::offset_t file_offset,
     lldb::offset_t length, lldb_private::ModuleSpecList &specs) {
-  // JIT'ed object file can't be read from a file on disk
-  return 0;
+    // JIT'ed object file can't be read from a file on disk
+    return 0;
 }
 
 ObjectFileTrampoline::ObjectFileTrampoline(const lldb::ModuleSP &module_sp,
@@ -87,44 +84,33 @@ uint32_t ObjectFileTrampoline::GetAddressByteSize() const {
   return m_data.GetAddressByteSize();
 }
 
-Symtab *ObjectFileTrampoline::GetSymtab() {
-  Log *log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_JIT_LOADER);
+void ObjectFileTrampoline::ParseSymtab(lldb_private::Symtab &symtab) {
+  Log *log = GetLog(LLDBLog::JITLoader);
 
-  ModuleSP module_sp(GetModule());
-  if (module_sp) {
-    std::lock_guard<std::recursive_mutex> guard(module_sp->GetMutex());
-    if (m_symtab_up == nullptr) {
-      m_symtab_up.reset(new Symtab(this));
-      std::lock_guard<std::recursive_mutex> symtab_guard(
-          m_symtab_up->GetMutex());
+  uint32_t symID = 0;
+  std::string name = "$__lldb_jitted_conditional_bp_trampoline";
+  //      bool name_is_mangled = false;
+  lldb::SymbolType type = eSymbolTypeCode;
+  bool external = false;
+  bool is_debug = false;
+  bool is_trampoline = false;
+  bool is_artificial = false;
+  bool size_is_valid = true;
+  bool contains_linker_annotions = false;
+  uint32_t flags = 0; // TODO: Find flags
+  const lldb::SectionSP &section_sp = m_sections_up->GetSectionAtIndex(0);
 
-      uint32_t symID = 0;
-      std::string name = "$__lldb_jitted_conditional_bp_trampoline";
-      //      bool name_is_mangled = false;
-      lldb::SymbolType type = eSymbolTypeCode;
-      bool external = false;
-      bool is_debug = false;
-      bool is_trampoline = false;
-      bool is_artificial = false;
-      bool size_is_valid = true;
-      bool contains_linker_annotions = false;
-      uint32_t flags = 0; // TODO: Find flags
-      const lldb::SectionSP &section_sp = m_sections_up->GetSectionAtIndex(0);
-
-      if (!section_sp) {
-        LLDB_LOG(log, "Couldn't find any section for Trampoline");
-        return nullptr;
-      }
-
-      const Symbol symbol(symID, name.c_str(), type, external, is_debug,
-                          is_trampoline, is_artificial, section_sp, 0, m_size,
-                          size_is_valid, contains_linker_annotions, flags);
-
-      m_symtab_up->AddSymbol(symbol);
-      m_symtab_up->Finalize();
-    }
+  if (!section_sp) {
+    LLDB_LOG(log, "Couldn't find any section for Trampoline");
+    return;
   }
-  return m_symtab_up.get();
+
+  const Symbol symbol(symID, name.c_str(), type, external, is_debug,
+                      is_trampoline, is_artificial, section_sp, 0, m_size,
+                      size_is_valid, contains_linker_annotions, flags);
+
+  m_symtab_up->AddSymbol(symbol);
+  m_symtab_up->Finalize();
 }
 
 bool ObjectFileTrampoline::IsStripped() {
@@ -210,11 +196,9 @@ ArchSpec ObjectFileTrampoline::GetArchitecture() {
 //------------------------------------------------------------------
 // PluginInterface protocol
 //------------------------------------------------------------------
-lldb_private::ConstString ObjectFileTrampoline::GetPluginName() {
+llvm::StringRef ObjectFileTrampoline::GetPluginName() {
   return GetPluginNameStatic();
 }
-
-uint32_t ObjectFileTrampoline::GetPluginVersion() { return 1; }
 
 bool ObjectFileTrampoline::SetLoadAddress(Target &target, lldb::addr_t value,
                                           bool value_is_offset) {
@@ -241,7 +225,7 @@ bool ObjectFileTrampoline::SetLoadAddress(Target &target, lldb::addr_t value,
 size_t ObjectFileTrampoline::ReadSectionData(lldb_private::Section *section,
                                              lldb::offset_t section_offset,
                                              void *dst, size_t dst_len) {
-  Log *log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_JIT_LOADER);
+  Log *log = GetLog(LLDBLog::JITLoader);
 
   lldb::offset_t file_size = section->GetFileSize();
   if (section_offset < file_size) {

@@ -313,6 +313,7 @@ typedef std::shared_ptr<lldb_private::Broadcaster> BroadcasterSP;
 typedef std::shared_ptr<lldb_private::BroadcasterManager> BroadcasterManagerSP;
 typedef std::weak_ptr<lldb_private::BroadcasterManager> BroadcasterManagerWP;
 typedef std::shared_ptr<lldb_private::UserExpression> UserExpressionSP;
+typedef std::shared_ptr<lldb_private::UtilityFunction> UtilityFunctionSP;
 typedef std::shared_ptr<lldb_private::CommandObject> CommandObjectSP;
 typedef std::shared_ptr<lldb_private::Connection> ConnectionSP;
 typedef std::shared_ptr<lldb_private::CompileUnit> CompUnitSP;
