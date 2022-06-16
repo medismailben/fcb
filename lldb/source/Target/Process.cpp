@@ -1624,7 +1624,7 @@ Process::FallbackToRegularBreakpointSite(const BreakpointLocationSP &owner,
 lldb::break_id_t
 Process::CreateBreakpointSite(const BreakpointLocationSP &owner,
                               bool use_hardware) {
-  Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_JIT_LOADER));
+  Log *log = GetLog(LLDBLog::JITLoader);
 
   addr_t load_addr = LLDB_INVALID_ADDRESS;
 
@@ -1793,7 +1793,7 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &owner,
 }
 
 size_t Process::SaveInstructions(Address &address) {
-  Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_JIT_LOADER));
+  Log *log = GetLog(LLDBLog::JITLoader);
 
   TargetSP target_sp = m_target_wp.lock();
   const char *plugin_name = nullptr;

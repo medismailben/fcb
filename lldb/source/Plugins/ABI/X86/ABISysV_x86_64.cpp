@@ -82,7 +82,7 @@ ABISysV_x86_64::GetDebugTrapOpcode() {
 bool ABISysV_x86_64::SetupFastConditionalBreakpointTrampoline(
     size_t instrs_size, uint8_t *instrs_data,
     BreakpointInjectedSite *bp_injected_site) {
-  Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_JIT_LOADER));
+  Log *log = GetLog(LLDBLog::JITLoader);
 
   lldb::addr_t jmp_addr = bp_injected_site->GetLoadAddress();
 

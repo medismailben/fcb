@@ -30,7 +30,7 @@ BreakpointInjectedSite::BreakpointInjectedSite(
 BreakpointInjectedSite::~BreakpointInjectedSite() {}
 
 bool BreakpointInjectedSite::BuildConditionExpression(void) {
-  Log *log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_JIT_LOADER);
+  Log *log = GetLog(LLDBLog::JITLoader);
 
   Status error;
 
@@ -182,7 +182,7 @@ bool BreakpointInjectedSite::BuildConditionExpression(void) {
 }
 
 bool BreakpointInjectedSite::ResolveTrapAddress(void *jit, size_t size) {
-  Log *log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_JIT_LOADER);
+  Log *log = GetLog(LLDBLog::JITLoader);
 
   const ABISP abi_sp = m_target_sp->GetProcessSP()->GetABI();
   const ArchSpec &arch = m_target_sp->GetArchitecture();
@@ -243,7 +243,7 @@ bool BreakpointInjectedSite::ResolveTrapAddress(void *jit, size_t size) {
 }
 
 bool BreakpointInjectedSite::GatherArgumentsMetadata() {
-  Log *log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_JIT_LOADER);
+  Log *log = GetLog(LLDBLog::JITLoader);
 
   LanguageType native_language = m_condition_expression_sp->Language();
 
@@ -347,7 +347,7 @@ bool BreakpointInjectedSite::GatherArgumentsMetadata() {
 }
 
 bool BreakpointInjectedSite::CreateArgumentsStructure() {
-  Log *log = lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_JIT_LOADER);
+  Log *log = GetLog(LLDBLog::JITLoader);
 
   Status error;
   std::string expr;
