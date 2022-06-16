@@ -77,7 +77,7 @@ lldb::ModuleSP ABI::CreateModuleForFastConditionalBreakpointTrampoline(
 
   if (!SupportsFCB()) {
     LLDB_LOG(log, "JIT: ABI {} does not implement JIT-ed breakpoint condition",
-             GetPluginName().AsCString());
+             GetPluginName().data());
     return nullptr;
   }
 

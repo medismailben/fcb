@@ -28,23 +28,25 @@ public:
                        lldb::ProcessSP process_sp, lldb::addr_t address,
                        std::size_t size);
 
+  ~ObjectFileTrampoline() = default;
+  
   //------------------------------------------------------------------
   // Static Functions
   //------------------------------------------------------------------
   static void Initialize();
   static void Terminate();
 
-  static lldb_private::ConstString GetPluginNameStatic();
+  static llvm::StringRef GetPluginNameStatic() { return "trampoline"; };
 
   static const char *GetPluginDescriptionStatic();
 
   static lldb_private::ObjectFile *
-  CreateInstance(const lldb::ModuleSP &module_sp, lldb::DataBufferSP &data_sp,
+  CreateInstance(const lldb::ModuleSP &module_sp, lldb::DataBufferSP data_sp,
                  lldb::offset_t data_offset, const lldb_private::FileSpec *file,
                  lldb::offset_t file_offset, lldb::offset_t length);
 
   static lldb_private::ObjectFile *CreateMemoryInstance(
-      const lldb::ModuleSP &module_sp, lldb::DataBufferSP &data_sp,
+      const lldb::ModuleSP &module_sp, lldb::WritableDataBufferSP data_sp,
       const lldb::ProcessSP &process_sp, lldb::addr_t header_addr);
 
   static size_t GetModuleSpecifications(const lldb_private::FileSpec &file,
@@ -68,7 +70,7 @@ public:
 
   uint32_t GetAddressByteSize() const override;
 
-  lldb_private::Symtab *GetSymtab() override;
+  void ParseSymtab(lldb_private::Symtab &symtab) override;
 
   bool IsStripped() override;
 
@@ -102,9 +104,7 @@ public:
   //------------------------------------------------------------------
   // PluginInterface protocol
   //------------------------------------------------------------------
-  lldb_private::ConstString GetPluginName() override;
-
-  uint32_t GetPluginVersion() override;
+  llvm::StringRef GetPluginName() override;
 
   //    /// LLVM RTTI support
   //    /// \{
