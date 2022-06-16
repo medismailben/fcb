@@ -20,7 +20,6 @@
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Logging.h"
 
 #include "llvm/MC/TargetRegistry.h"
 #include <cctype>
@@ -74,7 +73,7 @@ bool RegInfoBasedABI::GetRegisterInfoByName(llvm::StringRef name,
 
 lldb::ModuleSP ABI::CreateModuleForFastConditionalBreakpointTrampoline(
     lldb::addr_t address, std::size_t size, lldb::addr_t return_address) {
-  Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_JIT_LOADER));
+  Log *log = GetLog(LLDBLog::JITLoader);
 
   if (!SupportsFCB()) {
     LLDB_LOG(log, "JIT: ABI {} does not implement JIT-ed breakpoint condition",
