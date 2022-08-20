@@ -198,6 +198,31 @@ bool SBBreakpointLocation::GetAutoContinue() {
   return false;
 }
 
+void SBBreakpointLocation::SetInjectCondition(bool inject_condition) {
+  LLDB_INSTRUMENT_VA(this, inject_condition);
+
+  BreakpointLocationSP loc_sp = GetSP();
+  if (!loc_sp)
+    return;
+
+  std::lock_guard<std::recursive_mutex> guard(
+      loc_sp->GetTarget().GetAPIMutex());
+  loc_sp->SetInjectCondition(inject_condition);
+  loc_sp->GetBreakpoint().SetInjectCondition(inject_condition);
+}
+
+bool SBBreakpointLocation::GetInjectCondition() {
+  LLDB_INSTRUMENT_VA(this);
+
+  BreakpointLocationSP loc_sp = GetSP();
+  if (!loc_sp)
+    return false;
+
+  std::lock_guard<std::recursive_mutex> guard(
+      loc_sp->GetTarget().GetAPIMutex());
+  return loc_sp->GetInjectCondition();
+}
+
 void SBBreakpointLocation::SetScriptCallbackFunction(
   const char *callback_function_name) {
   LLDB_INSTRUMENT_VA(this, callback_function_name);

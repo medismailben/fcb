@@ -73,6 +73,15 @@ public:
     void SetAutoContinue(bool auto_continue);
 
     %feature("docstring", "
+    *EXPERIMENTAL* Check if the condition expression is injected and checked in-process.") GetInjectCondition;
+    bool GetInjectCondition();
+
+    %feature("docstring", "
+    *EXPERIMENTAL* The condition expression in injected and checked in-process.
+    Enables Fast Conditional Breakpoint.") SetInjectCondition;
+    void SetInjectCondition(bool inject_condition);
+
+    %feature("docstring", "
     Set the callback to the given Python function name.
     The function takes three arguments (frame, bp_loc, internal_dict).") SetScriptCallbackFunction;
     void

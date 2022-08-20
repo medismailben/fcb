@@ -153,6 +153,15 @@ public:
 
     bool GetAutoContinue();
 
+    %feature("docstring", "
+    *EXPERIMENTAL* Check if the condition expression is injected and checked in-process.") GetInjectCondition;
+    bool GetInjectCondition();
+
+    %feature("docstring", "
+    *EXPERIMENTAL* The condition expression in injected and checked in-process.
+    Toggles Fast Conditional Breakpoint.") SetInjectCondition;
+    void SetInjectCondition(bool inject_condition);
+
     void
     SetThreadID (lldb::tid_t sb_thread_id);
 

@@ -65,6 +65,7 @@ namespace lldb_private {
 ///    \b Ignore Count
 ///    \b Callback
 ///    \b Condition
+///    \b Inject Condition
 /// Note, these options can be set on the breakpoint, and they can also be set
 /// on the individual locations.  The options set on the breakpoint take
 /// precedence over the options set on the individual location. So for
@@ -402,6 +403,16 @@ public:
   ///    A pointer to the condition expression text, or nullptr if no
   //     condition has been set.
   const char *GetConditionText() const;
+
+  /// If \a inject_condition is \b true, inject the breakpoint condition in the
+  /// process.
+  void SetInjectCondition(bool inject_condition);
+
+  /// Check if the breakpoint condition should be injected
+  ///
+  /// \return
+  ///    If condition is injected \b true, \b false otherwise.
+  bool GetInjectCondition() const;
 
   // The next section are various utility functions.
 
