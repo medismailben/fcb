@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Target/ABI.h"
-#include "Plugins/ObjectFile/Trampoline/ObjectFileTrampoline.h"
+#include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Value.h"
@@ -20,6 +20,8 @@
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/Log.h"
+
+#include "Plugins/ObjectFile/Trampoline/ObjectFileTrampoline.h"
 
 #include "llvm/MC/TargetRegistry.h"
 #include <cctype>
@@ -69,6 +71,59 @@ bool RegInfoBasedABI::GetRegisterInfoByName(llvm::StringRef name,
     }
   }
   return false;
+}
+
+lldb::WritableDataBufferSP ABI::EmitAssembly(llvm::StringRef name,
+                                             std::stringstream &expr,
+                                             ExecutionContext exe_ctx) {
+  std::string symbol_name = "$__lldb_";
+  symbol_name += name.data();
+
+  Target &target = GetProcessSP()->GetTarget();
+
+  auto utility_fn_or_error = target.CreateUtilityFunction(
+      expr.str(), symbol_name, eLanguageTypeC, exe_ctx);
+
+  if (!utility_fn_or_error) {
+    std::string error_str = llvm::toString(utility_fn_or_error.takeError());
+    Log *log = GetLog(LLDBLog::JITLoader);
+    LLDB_LOG(log, "Error creating utility function: {}.", error_str);
+    return nullptr;
+  }
+
+  lldb::UtilityFunctionSP emitted_function_sp = std::move(*utility_fn_or_error);
+
+  const AddressRange &jit_addr_range =
+      emitted_function_sp->GetJITAddressRange();
+
+  WritableDataBufferSP buffer(
+      new DataBufferHeap(jit_addr_range.GetByteSize(), 0));
+
+  lldb::addr_t jit_addr =
+      jit_addr_range.GetBaseAddress().GetCallableLoadAddress(&target);
+
+  Status error;
+  size_t memory_read = GetProcessSP()->ReadMemory(jit_addr, buffer->GetBytes(),
+                                                  buffer->GetByteSize(), error);
+
+  if (memory_read != jit_addr_range.GetByteSize() || error.Fail()) {
+    error.SetErrorString("Couldn't read jit memory");
+    return nullptr;
+  }
+
+  const ArchSpec &arch = target.GetArchitecture();
+
+  auto dis = Disassembler::DisassembleRange(arch, 0, 0, target, jit_addr_range);
+
+  if (!dis)
+    return nullptr;
+
+  Debugger &dbg = target.GetDebugger();
+
+  dis->PrintInstructions(dbg, arch, exe_ctx, false, 0, 0,
+                         *dbg.GetAsyncOutputStream());
+
+  return buffer;
 }
 
 lldb::ModuleSP ABI::CreateModuleForFastConditionalBreakpointTrampoline(

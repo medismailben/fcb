@@ -140,8 +140,9 @@ BreakpointOptions::BreakpointOptions(const BreakpointOptions &rhs)
       m_baton_is_command_baton(rhs.m_baton_is_command_baton),
       m_callback_is_synchronous(rhs.m_callback_is_synchronous),
       m_enabled(rhs.m_enabled), m_one_shot(rhs.m_one_shot),
-      m_ignore_count(rhs.m_ignore_count), m_auto_continue(rhs.m_auto_continue),
-      m_inject_condition(rhs.m_inject_condition), m_set_flags(rhs.m_set_flags) {
+      m_ignore_count(rhs.m_ignore_count),
+      m_inject_condition(rhs.m_inject_condition),
+      m_auto_continue(rhs.m_auto_continue), m_set_flags(rhs.m_set_flags) {
   if (rhs.m_thread_spec_up != nullptr)
     m_thread_spec_up = std::make_unique<ThreadSpec>(*rhs.m_thread_spec_up);
   m_condition_text = rhs.m_condition_text;

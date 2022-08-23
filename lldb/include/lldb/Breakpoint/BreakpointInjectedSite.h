@@ -69,6 +69,8 @@ public:
     return m_create_args_struct_function_sp->StartAddress();
   }
 
+  Address &GetRealAddress() { return m_real_addr; }
+
   lldb::addr_t GetTrapAddress() {
     return m_trap_addr.GetLoadAddress(m_target_sp.get());
   }
@@ -101,8 +103,9 @@ public:
     ///    The size in bytes for the address of the current architecture.
     ///
     VariableMetadata(std::string name, size_t size, llvm::DataExtractor data,
-                     uint8_t address_size)
-        : name(std::move(name)), size(size), dwarf(data, address_size) {}
+                     uint8_t address_size, DWARFExpressionList expr)
+        : name(std::move(name)), size(size), dwarf(data, address_size),
+    expr_list(expr) {}
 
     /// The variable name.
     std::string name;
@@ -110,6 +113,8 @@ public:
     size_t size;
     /// The variable DWARF Expression.
     llvm::DWARFExpression dwarf;
+    /// The LLDB DWARF expression list.
+    DWARFExpressionList expr_list;
   };
 
 private:

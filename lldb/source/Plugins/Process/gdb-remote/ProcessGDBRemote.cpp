@@ -2778,12 +2778,13 @@ size_t ProcessGDBRemote::DoWriteMemory(addr_t addr, const void *buf,
 
 lldb::addr_t ProcessGDBRemote::DoAllocateMemory(size_t size,
                                                 uint32_t permissions,
-                                                Status &error) {
+                                                Status &error,
+                                                lldb::addr_t addr) {
   Log *log = GetLog(LLDBLog::Process | LLDBLog::Expressions);
   addr_t allocated_addr = LLDB_INVALID_ADDRESS;
 
   if (m_gdb_comm.SupportsAllocDeallocMemory() != eLazyBoolNo) {
-    allocated_addr = m_gdb_comm.AllocateMemory(size, permissions);
+    allocated_addr = m_gdb_comm.AllocateMemory(size, permissions, addr);
     if (allocated_addr != LLDB_INVALID_ADDRESS ||
         m_gdb_comm.SupportsAllocDeallocMemory() == eLazyBoolYes)
       return allocated_addr;

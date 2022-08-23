@@ -59,7 +59,8 @@ public:
   int GetMemoryRegionInfo(nub_addr_t addr, DNBRegionInfo *region_info);
   std::string GetProfileData(DNBProfileDataScanType scanType);
 
-  nub_addr_t AllocateMemory(nub_size_t size, uint32_t permissions);
+  nub_addr_t AllocateMemory(nub_size_t size, uint32_t permissions,
+                            nub_addr_t addr = INVALID_NUB_ADDRESS);
   nub_bool_t DeallocateMemory(nub_addr_t addr);
 
   mach_port_t ExceptionPort() const;

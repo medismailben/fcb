@@ -9,6 +9,9 @@
 #ifndef LLDB_TARGET_ABI_H
 #define LLDB_TARGET_ABI_H
 
+#include <ios>
+#include <sstream>
+
 #include "lldb/Core/PluginInterface.h"
 #include "lldb/Symbol/UnwindPlan.h"
 #include "lldb/Target/DynamicRegisterInfo.h"
@@ -181,7 +184,6 @@ public:
   ///    The address of the Fast Conditional Breakpoint Trampoline.
   ///
   virtual bool SetupFastConditionalBreakpointTrampoline(
-      size_t instrs_size, uint8_t *instrs_data,
       BreakpointInjectedSite *bp_inject_site) {
     return false;
   }
@@ -195,6 +197,10 @@ public:
   virtual llvm::StringRef GetMachTypesAsString() { return ""; }
 
   virtual bool SupportsFCB() { return false; }
+
+  lldb::WritableDataBufferSP
+  EmitAssembly(llvm::StringRef name, std::stringstream &expr,
+               lldb_private::ExecutionContext exe_ctx);
 
   virtual llvm::Expected<OpcodeArray> GetDebugTrapOpcode() {
     return llvm::createStringError(llvm::errc::invalid_argument,

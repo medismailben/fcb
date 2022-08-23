@@ -15,22 +15,11 @@
 
 class ABIMacOSX_arm64 : public ABIAArch64 {
 public:
-  static constexpr const uint8_t aarch64_jmp_opcode = 0xE9;
-  static constexpr const uint8_t aarch64_call_opcode = 0xE8;
-  static constexpr const uint8_t aarch64_mov_opcode = 0x89;
-  static constexpr const uint8_t aarch64_sub_opcode = 0x83;
-  static constexpr const uint8_t aarch64_add_opcode = 0x83;
-
-  static constexpr const uint8_t aarch64_push_opcode = 0x50;
-  static constexpr const uint8_t aarch64_pop_opcode = 0x58;
-
   static constexpr const std::size_t aarch64_instr_size = 4;
-  static constexpr const std::size_t aarch64_saved_register_size = 24;
-  static constexpr const std::size_t aarch64_volatile_register_size = 8;
 
   static constexpr const char *register_context = R"(typedef struct {
-                                                      intptr_t cpsr;
-                                                      intptr_t pc;
+                                                      // intptr_t cpsr;
+                                                      // intptr_t pc;
                                                       intptr_t sp;
                                                       intptr_t lr;
                                                       intptr_t fp;
@@ -82,6 +71,9 @@ public:
 
   bool CreateDefaultUnwindPlan(lldb_private::UnwindPlan &unwind_plan) override;
 
+  bool CreateTrampolineUnwindPlan(lldb_private::UnwindPlan &unwind_plan,
+                                  lldb::addr_t return_address) override;
+
   bool RegisterIsVolatile(const lldb_private::RegisterInfo *reg_info) override;
 
   // The arm64 ABI requires that stack frames be 16 byte aligned.
@@ -125,26 +117,13 @@ public:
   /// \param[in] instrs_size
   ///    The size in bytes of the copied instructions.
   ///
-  /// \param[in] data
-  ///    The copied instructions buffer.
-  ///
-  /// \param[in] jmp_addr
-  ///    The address of the source .
-  ///
-  /// \param[in] util_func_addr
-  ///    The address of the JIT-ed argument structure builder.
-  ///
-  /// \param[in] cond_expr_addr
-  ///    The address of the JIT-ed condition checker.
-  ///
   /// \return
   ///    \b true If building the Trampoline succeeded, \b false otherwise.
   ///
   bool SetupFastConditionalBreakpointTrampoline(
-      size_t instrs_size, uint8_t *instrs_data,
       lldb_private::BreakpointInjectedSite *bp_inject_site) override;
 
-  size_t GetJumpSize() override { return aarch64_instr_size; }
+  size_t GetJumpSize() override { return aarch64_instr_size; };
 
   llvm::StringRef GetRegisterContextAsString() override {
     return register_context;
@@ -174,6 +153,10 @@ protected:
   lldb::ValueObjectSP
   GetReturnValueObjectImpl(lldb_private::Thread &thread,
                            lldb_private::CompilerType &ast_type) const override;
+
+  lldb::WritableDataBufferSP
+  EmitBranchToAddressAssembly(lldb_private::ExecutionContext &exe_ctx,
+                              ssize_t return_addr = LLDB_INVALID_ADDRESS);
 
 private:
   using ABIAArch64::ABIAArch64; // Call CreateInstance instead.

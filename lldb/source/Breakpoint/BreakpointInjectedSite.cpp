@@ -12,6 +12,7 @@
 #include "Plugins/ExpressionParser/Clang/ClangUserExpression.h"
 #include "lldb/Expression/ExpressionVariable.h"
 #include "lldb/Target/Language.h"
+#include "lldb/Target/RegisterContext.h"
 
 #include "lldb/Target/ABI.h"
 
@@ -314,9 +315,10 @@ bool BreakpointInjectedSite::GatherArgumentsMetadata() {
 
     VariableSP var_sp = val_obj_sp->GetVariable();
 
-    DWARFExpression lldb_dwarf_expr = var_sp->LocationExpression();
+    DWARFExpressionList lldb_dwarf_exprs = var_sp->LocationExpressionList();
+
     DataExtractor lldb_data;
-    if (!lldb_dwarf_expr.GetExpressionData(lldb_data)) {
+    if (!lldb_dwarf_exprs.GetExpressionData(lldb_data)) {
       return false;
     }
 
@@ -336,7 +338,7 @@ bool BreakpointInjectedSite::GatherArgumentsMetadata() {
     }
 
     VariableMetadata metadata(expr_var->GetName().GetCString(), size.getValue(),
-                              llvm_data, addr_size);
+                              llvm_data, addr_size, lldb_dwarf_exprs);
 
     m_metadatas.push_back(metadata);
   }
@@ -434,9 +436,60 @@ std::string BreakpointInjectedSite::ParseDWARFExpression(size_t index,
               "   memcpy(dst_addr, &src_addr, count);\n";
       break;
     }
+    case llvm::dwarf::DW_OP_breg0:
+    case llvm::dwarf::DW_OP_breg1:
+    case llvm::dwarf::DW_OP_breg2:
+    case llvm::dwarf::DW_OP_breg3:
+    case llvm::dwarf::DW_OP_breg4:
+    case llvm::dwarf::DW_OP_breg5:
+    case llvm::dwarf::DW_OP_breg6:
+    case llvm::dwarf::DW_OP_breg7:
+    case llvm::dwarf::DW_OP_breg8:
+    case llvm::dwarf::DW_OP_breg9:
+    case llvm::dwarf::DW_OP_breg10:
+    case llvm::dwarf::DW_OP_breg11:
+    case llvm::dwarf::DW_OP_breg12:
+    case llvm::dwarf::DW_OP_breg13:
+    case llvm::dwarf::DW_OP_breg14:
+    case llvm::dwarf::DW_OP_breg15:
+    case llvm::dwarf::DW_OP_breg16:
+    case llvm::dwarf::DW_OP_breg17:
+    case llvm::dwarf::DW_OP_breg18:
+    case llvm::dwarf::DW_OP_breg19:
+    case llvm::dwarf::DW_OP_breg20:
+    case llvm::dwarf::DW_OP_breg21:
+    case llvm::dwarf::DW_OP_breg22:
+    case llvm::dwarf::DW_OP_breg23:
+    case llvm::dwarf::DW_OP_breg24:
+    case llvm::dwarf::DW_OP_breg25:
+    case llvm::dwarf::DW_OP_breg26:
+    case llvm::dwarf::DW_OP_breg27:
+    case llvm::dwarf::DW_OP_breg28:
+    case llvm::dwarf::DW_OP_breg29:
+    case llvm::dwarf::DW_OP_breg30:
+    case llvm::dwarf::DW_OP_breg31: {
+      uint8_t reg_num = op.getCode() - llvm::dwarf::DW_OP_breg0;
+      uint64_t offset = op.getRawOperand(0);
+        
+      RegisterContext* reg_ctx = m_owner_exe_ctx.GetRegisterContext();
+      if (!reg_ctx)
+        return "";
+    
+        
+      const char *reg_name = reg_ctx->GetRegisterName(reg_num);
+      if (!reg_name)
+        return "";
+      
+      expr += "   src_addr = (void*) (regs->" + std::string(reg_name) + " + " +
+              std::to_string(offset) +
+              ");\n"
+              "   dst_addr = (void*) (arg_struct + " +
+              std::to_string(index * 8) +
+              ");\n"
+              "   memcpy(dst_addr, &src_addr, count);\n";
+    } break;
     default: {
       error.Clear();
-      //      error.SetErrorToErrno();
       break;
     }
     }

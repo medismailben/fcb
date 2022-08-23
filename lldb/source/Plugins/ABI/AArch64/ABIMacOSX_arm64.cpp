@@ -8,6 +8,7 @@
 
 #include "ABIMacOSX_arm64.h"
 
+#include <cmath>
 #include <vector>
 
 #include "llvm/ADT/STLExtras.h"
@@ -41,218 +42,201 @@ bool ABIMacOSX_arm64::GetFramePointerRegister(const char *&name) {
   return true;
 }
 
-// TODO: Implement for ARM
 // https://github.com/apple/darwin-xnu/blob/main/osfmk/arm64/cswitch.s
 // https://github.com/RTEMS/rtems/blob/master/cpukit/score/cpu/aarch64/cpu_asm.S
 bool ABIMacOSX_arm64::SetupFastConditionalBreakpointTrampoline(
-    size_t instrs_size, uint8_t *instrs_data,
-    BreakpointInjectedSite *bp_injected_site) {
+                                                               BreakpointInjectedSite *bp_injected_site) {
   Log *log = GetLog(LLDBLog::JITLoader);
-
-  lldb::addr_t jmp_addr = bp_injected_site->GetLoadAddress();
-
-  const lldb::addr_t cond_expr_addr =
-      bp_injected_site->GetConditionExpressionAddress();
-  const lldb::addr_t util_func_addr =
-      bp_injected_site->GetUtilityFunctionAddress();
-
-  ProcessSP process_sp = m_process_wp.lock();
-
-  // Copy saved instructions to the inferior memory buffer.
-  Status error;
-  uint8_t alignment = 16;
-  uint32_t permission =
-      ePermissionsReadable | ePermissionsWritable | ePermissionsExecutable;
-  IRMemoryMap::AllocationPolicy policy = IRMemoryMap::eAllocationPolicyMirror;
-
-  IRMemoryMap memory_map(process_sp->GetTarget().shared_from_this());
-
-  size_t context_size =
-      aarch64_instr_size;
-
+  
+  TargetSP target_sp = bp_injected_site->GetTargetSP();
+  if (!target_sp) {
+    // Add logging
+    return false;
+  }
+  
+  ProcessSP process_sp = target_sp->GetProcessSP();
+  if (!process_sp) {
+    // Add logging
+    return false;
+  }
+  
+  size_t copied_instr_size = GetJumpSize();
+  
+  /// Initially, assume that we will patch a single instruction (b offset) to
+  /// branch to the trampoline. We will update the return address after saving
+  /// the instructions.
+  //  const lldb::addr_t return_addr = bp_injected_site->GetLoadAddress() +
+  //  copied_instr_size; // + 1 ?
+  
+  std::stringstream ss;
+  
+  ss << "__attribute__((naked,noreturn)) void $__lldb_emit_trampoline() {\n"
+     << "    __asm__ (\n"
+     << "      R\"(\n";
+  
   /// Saving General Purpose Registers.
-  size_t expected_trampoline_size = context_size;
+  ss << "           stp x0, x1, [sp, #-16]!\n"
+     << "           stp x2, x3, [sp, #-16]!\n"
+     << "           stp x4, x5, [sp, #-16]!\n"
+     << "           stp x6, x7, [sp, #-16]!\n"
+     << "           stp x8, x9, [sp, #-16]!\n"
+     << "           stp x10, x11, [sp, #-16]!\n"
+     << "           stp x12, x13, [sp, #-16]!\n"
+     << "           stp x14, x15, [sp, #-16]!\n"
+     << "           stp x16, x17, [sp, #-16]!\n"
+     << "           stp x18, x19, [sp, #-16]!\n"
+     << "           stp x20, x21, [sp, #-16]!\n"
+     << "           stp x22, x23, [sp, #-16]!\n"
+     << "           stp x24, x25, [sp, #-16]!\n"
+     << "           stp x26, x27, [sp, #-16]!\n"
+     << "           stp x28, x29, [sp, #-16]!\n"
+     << "           stp x30, x31, [sp, #-16]!\n";
+  
   /// Pass register context address to argument structure builder.
-  expected_trampoline_size += aarch64_instr_size;
   /// Allocating argument structure on the stack.
-  expected_trampoline_size += aarch64_instr_size;
   /// Pass argument structure address to argument structure builder.
-  expected_trampoline_size += aarch64_instr_size;
   /// Call argument structure builder.
-  expected_trampoline_size += aarch64_instr_size;
-  /// Pass returned argument structure to condition expression evaluator.
-  expected_trampoline_size += aarch64_instr_size;
+  /// No need to move return value to the right register.
   /// Call condition expression evaluator.
-  expected_trampoline_size += aarch64_instr_size;
-  /// Re-Align stack pointer
-  expected_trampoline_size += aarch64_instr_size;
   /// Restore General Purpose Registers.
-  expected_trampoline_size += context_size;
-  /// Run copied instructions.
-  expected_trampoline_size += instrs_size;
-  /// Jump back to user's code.
-  expected_trampoline_size += aarch64_instr_size;
-
-  addr_t trampoline_addr = memory_map.Malloc(
-      expected_trampoline_size, alignment, permission, policy, true, error);
-
-  if (trampoline_addr == LLDB_INVALID_ADDRESS) {
-    LLDB_LOG(log, "JIT: Couldn't allocate trampoline buffer");
-    return LLDB_INVALID_ADDRESS;
-  }
-
-  size_t trampoline_size = 0;
-
-  uint8_t trampoline_buffer[expected_trampoline_size];
-
-  uint8_t regs_ctx[context_size];
-  /// Saving General Purpose Registers.
-  for (size_t i = 0; i < 8; i++)
-    regs_ctx[i] = aarch64_push_opcode + i;
-  for (size_t i = 0; i < 8; i++) {
-    size_t offset = aarch64_instr_size + 2 * i;
-    // regs_ctx[offset] = aarch64_rexb_opcode;
-    regs_ctx[offset + 1] = aarch64_push_opcode + i;
-  }
-  std::memcpy(trampoline_buffer, &regs_ctx, context_size);
-  trampoline_size += context_size;
-
-  /// Pass register context address to argument structure builder.
-  uint8_t mov_buffer[aarch64_instr_size];
-  // mov_buffer[0] = aarch64_rexw_opcode;
-  // mov_buffer[1] = aarch64_mov_opcode;
-  // mov_buffer[2] = aarch64_rsp_rdi_sib_byte; // mov rsp, rdi
-  std::memcpy(&trampoline_buffer[trampoline_size], &mov_buffer,
-              aarch64_instr_size);
-  trampoline_size += aarch64_instr_size;
-
+  
   size_t variable_count = bp_injected_site->GetVariableCount();
   size_t address_size_in_byte =
-      bp_injected_site->GetTargetSP()->GetArchitecture().GetAddressByteSize();
-
-  /// Allocating argument structure on the stack.
-  uint8_t sub_buffer[aarch64_instr_size];
-  // sub_buffer[0] = aarch64_rexw_opcode;
-  // sub_buffer[1] = aarch64_sub_opcode;
-  // sub_buffer[2] = aarch64_sub_byte;
-  // sub_buffer[3] = variable_count * address_size_in_byte;
-  std::memcpy(&trampoline_buffer[trampoline_size], &sub_buffer,
-              aarch64_instr_size);
-  trampoline_size += aarch64_instr_size;
-
-  /// Pass register context address to argument structure builder.
-  // mov_buffer[0] = aarch64_rexw_opcode;
-  // mov_buffer[1] = aarch64_mov_opcode;
-  // mov_buffer[2] = aarch64_rsp_rsi_sib_byte; // mov rsp, rsi
-  std::memcpy(&trampoline_buffer[trampoline_size], &mov_buffer,
-              aarch64_instr_size);
-  trampoline_size += aarch64_instr_size;
-
-  /// Call argument structure builder.
-  uint8_t call_buffer[aarch64_instr_size];
-  uint32_t call_offset =
-      -aarch64_instr_size - trampoline_addr + util_func_addr;
-  call_buffer[0] = aarch64_call_opcode;
-  std::memcpy(&call_buffer[1], &call_offset, sizeof(uint32_t));
-  std::memcpy(&trampoline_buffer[trampoline_size], call_buffer,
-              aarch64_instr_size);
-  trampoline_size += aarch64_instr_size;
-
-  /// Pass returned argument structure to condition expression evaluator.
-  // mov_buffer[2] = aarch64_rax_rdi_sib_byte; // mov rax, rdi
-  std::memcpy(&trampoline_buffer[trampoline_size], &mov_buffer,
-              aarch64_instr_size);
-  trampoline_size += aarch64_instr_size;
-
-  /// Call condition expression evaluator.
-  call_offset =
-      -aarch64_instr_size - trampoline_addr + cond_expr_addr;
-  call_buffer[0] = aarch64_call_opcode;
-  std::memcpy(&call_buffer[1], &call_offset, sizeof(uint32_t));
-  std::memcpy(&trampoline_buffer[trampoline_size], call_buffer,
-              aarch64_instr_size);
-  trampoline_size += aarch64_instr_size;
-
-  /// Re-Align stack pointer
-  uint8_t add_buffer[aarch64_instr_size];
-  // add_buffer[0] = aarch64_rexw_opcode;
-  // add_buffer[1] = aarch64_add_opcode;
-  // add_buffer[2] = aarch64_add_byte;
-  // add_buffer[3] = variable_count * address_size_in_byte;
-  std::memcpy(&trampoline_buffer[trampoline_size], &add_buffer,
-              aarch64_instr_size);
-  trampoline_size += aarch64_instr_size;
-
-  /// Restore General Purpose Registers.
-  for (size_t i = 0; i < 8; i++) {
-    // regs_ctx[2 * i] = aarch64_rexb_opcode;
-    // regs_ctx[2 * i + 1] =
-    //     aarch64_instr_size - i - 1;
+  bp_injected_site->GetTargetSP()->GetArchitecture().GetAddressByteSize();
+  const lldb::addr_t util_func_addr =
+  bp_injected_site->GetUtilityFunctionAddress();
+  const lldb::addr_t cond_expr_addr =
+  bp_injected_site->GetConditionExpressionAddress();
+  
+  ss << "           mov x0, sp\n"
+     << "           sub sp, sp, #" << variable_count * address_size_in_byte
+     << "\n"
+     << "           mov x1, sp\n"
+     << "           ldr x17, =0x" << std::hex << util_func_addr << "\n"
+     << "           blr x17\n"
+     << "           ldr x17, =0x" << std::hex << cond_expr_addr << "\n"
+     << "           blr x17\n"
+     << "           ldp x30, x31, [sp, #16]!\n"
+     << "           ldp x28, x29, [sp, #16]!\n"
+     << "           ldp x26, x27, [sp, #16]!\n"
+     << "           ldp x24, x25, [sp, #16]!\n"
+     << "           ldp x22, x23, [sp, #16]!\n"
+     << "           ldp x20, x21, [sp, #16]!\n"
+     << "           ldp x18, x19, [sp, #16]!\n"
+     << "           ldp x16, x17, [sp, #16]!\n"
+     << "           ldp x14, x15, [sp, #16]!\n"
+     << "           ldp x12, x13, [sp, #16]!\n"
+     << "           ldp x10, x11, [sp, #16]!\n"
+     << "           ldp x8, x9, [sp, #16]!\n"
+     << "           ldp x6, x7, [sp, #16]!\n"
+     << "           ldp x4, x5, [sp, #16]!\n"
+     << "           ldp x2, x3, [sp, #16]!\n"
+     << "           ldp x0, x1, [sp, #16]!\n";
+  
+  /// Allocate space to copy inferior instructions and jump back to user's code
+  ss << "           nop\n"
+  << "           nop\n"
+  << "        )\");\n"
+  << "}";
+  
+  ExecutionContext exe_ctx = bp_injected_site->GetOwnerExecutionContext();
+  auto trampoline_instr = EmitAssembly("emit_trampoline", ss, exe_ctx);
+  if (!trampoline_instr)
+    return false;
+  
+  Address &bp_addr = bp_injected_site->GetRealAddress();
+  addr_t bp_load_addr = bp_addr.GetLoadAddress(target_sp.get());
+  auto saved_instrs = process_sp->SaveInstructions(bp_addr);
+  if (!saved_instrs) {
+    //    error = "FCB: Couldn't save instructions";
+    return false;
   }
-  for (size_t i = 0; i < 8; i++)
-    regs_ctx[aarch64_instr_size + i] =
-        aarch64_instr_size - i - 1;
-  std::memcpy(&trampoline_buffer[trampoline_size], &regs_ctx, context_size);
-  trampoline_size += context_size;
-
-  /// Run copied instructions.
-  std::memcpy(&trampoline_buffer[trampoline_size], instrs_data, instrs_size);
-  trampoline_size += instrs_size;
-
-  /// Jump back to user's code.
-  uint8_t jmp_buffer[aarch64_instr_size];
-  uint32_t jmp_offset = jmp_addr - trampoline_addr - trampoline_size;
-
-  jmp_buffer[0] = aarch64_jmp_opcode;
-  std::memcpy(&jmp_buffer[1], &jmp_offset, sizeof(uint32_t));
-  std::memcpy(&trampoline_buffer[trampoline_size], jmp_buffer,
-              aarch64_instr_size);
-  trampoline_size += aarch64_instr_size;
-
-  if (trampoline_size != expected_trampoline_size) {
-    LLDB_LOG(
-        log,
-        "JIT: Trampoline size ({0} bytes) is not the one expected ({1} bytes)",
-        trampoline_size, expected_trampoline_size);
+  
+  /// Allocate trampoline +100MiB from the bp site
+  /// We need to allocate the trampoline stub to compute the branch offset to it
+  /// and back to the user code.
+  /// TODO: We should DeAllocate the stub if we fail in the following stages.
+  size_t trampoline_size = trampoline_instr->GetByteSize();
+  uint32_t permission = ePermissionsReadable | ePermissionsExecutable;
+  Status error;
+  addr_t trampoline_expected_addr = process_sp->NextFCBTrampolineAllocation(bp_load_addr);
+  addr_t trampoline_addr = process_sp->AllocateMemory(trampoline_size, permission, error, trampoline_expected_addr);
+  // Check that the returned trampoline addr is the paged aligned expected addr.
+  if (!trampoline_addr || trampoline_addr == LLDB_INVALID_ADDRESS) {
+    LLDB_LOG(log, "JIT: Couldn't allocate trampoline buffer");
+    return false;
+  }
+  
+  if (!process_sp->NewFCBTrampolineAllocation(trampoline_addr, trampoline_size)) {
+    LLDB_LOG(log, "JIT: Allocated trampoline address already in use");
     return false;
   }
 
-  size_t written_bytes = process_sp->WriteMemory(
-      trampoline_addr, &trampoline_buffer, trampoline_size, error);
+  /// Run copied instructions and jump back to user's code
+  /// FIXME: Disassemble trampoline and detect first `nop` instr
+  const lldb::offset_t copied_instr_offset = 39 * aarch64_instr_size;
+  ss = std::stringstream();
+  ss << "__attribute__((naked,noreturn)) void $__lldb_emit_branch_to_source() "
+        "{\n"
+     << "    __asm__ (\n"
+     << "      R\"(\n"
+     << "           b 0x" << std::hex
+     << bp_load_addr - trampoline_addr + copied_instr_offset +
+            aarch64_instr_size
+     << "\n"
+     << "        )\");\n"
+     << "}";
 
+  auto branch_instr = EmitAssembly("emit_branch_to_source", ss, exe_ctx);
+  if (!branch_instr)
+    return false;
+
+  const auto &trampoline_buffer = trampoline_instr->GetData();
+
+  /// Copy inferior instructions into trampoline.
+  std::memcpy(&trampoline_buffer[copied_instr_offset], saved_instrs->GetBytes(),
+              saved_instrs->GetByteSize());
+  std::memcpy(&trampoline_buffer[copied_instr_offset + aarch64_instr_size],
+              branch_instr->GetBytes(), aarch64_instr_size);
+
+  size_t written_bytes = process_sp->WriteMemory(
+      trampoline_addr, trampoline_buffer.data(), trampoline_size, error);
   if (written_bytes != trampoline_size || error.Fail()) {
     LLDB_LOG(log, "JIT: Couldn't write trampoline buffer to inferior");
     return false;
   }
 
-  // Overwrite current instruction with JMP.
-  jmp_offset = trampoline_addr - jmp_addr - aarch64_instr_size;
+  /// Patch inferior to branch to trampoline
+  ss = std::stringstream();
+  ss << "__attribute__((naked,noreturn)) void "
+        "$__lldb_emit_branch_to_trampoline() {\n"
+     << "    __asm__ (\n"
+     << "      R\"(\n"
+     << "           b 0x" << std::hex << trampoline_addr - bp_load_addr << "\n"
+     << "        )\");\n"
+     << "}";
 
-  jmp_buffer[0] = aarch64_jmp_opcode;
-  std::memcpy(&jmp_buffer[1], &jmp_offset, sizeof(uint32_t));
+  branch_instr = EmitAssembly("emit_branch_to_trampoline", ss, exe_ctx);
+  if (!branch_instr)
+    return false;
 
-  for (size_t i = 0; i < aarch64_instr_size; i++)
-    LLDB_LOGV(log, "0x{:x}", jmp_buffer[i]);
-
-  written_bytes =
-      process_sp->WriteMemory(jmp_addr, jmp_buffer, aarch64_instr_size, error);
-
-  if (written_bytes != aarch64_instr_size || error.Fail()) {
-    LLDB_LOG(log, "JIT: Couldn't override instruction with branching");
+  written_bytes = process_sp->WriteMemory(
+      bp_load_addr, branch_instr->GetBytes(), aarch64_instr_size, error);
+  if (written_bytes != copied_instr_size || error.Fail()) {
+    LLDB_LOG(log, "JIT: Couldn't patch inferior with branch to trampoline");
     return false;
   }
 
   lldb::ModuleSP trampoline_module_sp =
       CreateModuleForFastConditionalBreakpointTrampoline(
-          trampoline_addr, trampoline_size, jmp_addr);
+          trampoline_addr, trampoline_size, bp_load_addr);
 
   if (!trampoline_module_sp) {
     LLDB_LOG(log, "JIT: Couldn't get trampoline module");
     return false;
   }
 
-  Target &target = process_sp->GetTarget();
-  ModuleList &images = target.GetImages();
+  ModuleList &images = target_sp->GetImages();
   size_t image_count = images.GetSize();
 
   images.Append(trampoline_module_sp);
@@ -261,8 +245,6 @@ bool ABIMacOSX_arm64::SetupFastConditionalBreakpointTrampoline(
     LLDB_LOG(log, "JIT: Couldn't add trampoline module to image list");
     return false;
   }
-
-  jmp_addr = trampoline_addr;
 
   return true;
 }
@@ -626,6 +608,37 @@ bool ABIMacOSX_arm64::CreateDefaultUnwindPlan(UnwindPlan &unwind_plan) {
   unwind_plan.SetSourcedFromCompiler(eLazyBoolNo);
   unwind_plan.SetUnwindPlanValidAtAllInstructions(eLazyBoolNo);
   unwind_plan.SetUnwindPlanForSignalTrap(eLazyBoolNo);
+  return true;
+}
+
+// This defines the CFA as rsp+256
+// The saved pc is at value
+
+bool ABIMacOSX_arm64::CreateTrampolineUnwindPlan(UnwindPlan &unwind_plan,
+                                                 addr_t return_address) {
+  unwind_plan.Clear();
+  unwind_plan.SetRegisterKind(eRegisterKindDWARF);
+
+  uint32_t sp_reg_num = arm64_dwarf::sp;
+  uint32_t pc_reg_num = arm64_dwarf::pc;
+
+  UnwindPlan::RowSP row(new UnwindPlan::Row);
+  const int32_t ptr_size = 8;
+
+  row->GetCFAValue().SetIsRegisterPlusOffset(sp_reg_num, 32 * ptr_size);
+  row->SetOffset(0);
+//  row->SetUnspecifiedRegistersAreUndefined(true);
+
+  // MARK: The PC is set to return address + 1 because the unwinder will usually
+  // try to decrement the PC to show the current instruction.
+  row->SetRegisterLocationToConstantValue(pc_reg_num, return_address + 1, true);
+  row->SetRegisterLocationToIsCFAPlusOffset(sp_reg_num, 0, true);
+
+  unwind_plan.AppendRow(row);
+  unwind_plan.SetSourceName("arm64-apple-darwin trampoline unwind plan");
+  unwind_plan.SetSourcedFromCompiler(eLazyBoolNo);
+  unwind_plan.SetUnwindPlanValidAtAllInstructions(eLazyBoolNo);
+//  unwind_plan.SetUnwindPlanForSignalTrap(eLazyBoolNo);
   return true;
 }
 

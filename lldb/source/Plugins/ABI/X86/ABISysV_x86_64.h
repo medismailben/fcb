@@ -150,7 +150,7 @@ public:
   ///
   bool SetupFastConditionalBreakpointTrampoline(
       size_t instrs_size, uint8_t *instrs_data,
-      lldb_private::BreakpointInjectedSite *bp_inject_site) override;
+      lldb_private::BreakpointInjectedSite *bp_inject_site);
 
   size_t GetJumpSize() override { return x86_64_jmp_size; }
 
