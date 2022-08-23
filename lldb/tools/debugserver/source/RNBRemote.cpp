@@ -3381,9 +3381,10 @@ static bool RNBRemoteShouldCancelCallback(void *not_used) {
   return true;
 }
 
-// FORMAT: _MXXXXXX,PPP
+// FORMAT: _MXXXXXX,PPP[,XXXXXX]
 //      XXXXXX: big endian hex chars
 //      PPP: permissions can be any combo of r w x chars
+//      XXXXXX: optional address that should be allocated
 //
 // RESPONSE: XXXXXX
 //      XXXXXX: hex address of the newly allocated memory
@@ -3393,6 +3394,7 @@ static bool RNBRemoteShouldCancelCallback(void *not_used) {
 //      _M123000,rw
 //      _M123000,rwx
 //      _M123000,xw
+//      _M123000,rx,123000
 
 rnb_err_t RNBRemote::HandlePacket_AllocateMemory(const char *p) {
   StdStringExtractor packet(p);
@@ -3402,6 +3404,9 @@ rnb_err_t RNBRemote::HandlePacket_AllocateMemory(const char *p) {
   if (size != 0) {
     if (packet.GetChar() == ',') {
       uint32_t permissions = 0;
+
+      nub_addr_t addr = INVALID_NUB_ADDRESS;
+
       char ch;
       bool success = true;
       while (success && (ch = packet.GetChar()) != '\0') {
@@ -3415,6 +3420,11 @@ rnb_err_t RNBRemote::HandlePacket_AllocateMemory(const char *p) {
         case 'x':
           permissions |= eMemoryPermissionsExecutable;
           break;
+        case ',': {
+          // There is an 'addr' field in the packet
+          addr = packet.GetHexMaxU64(StdStringExtractor::BigEndian, 0);
+          success = addr;
+        } break;
         default:
           success = false;
           break;
@@ -3422,8 +3432,8 @@ rnb_err_t RNBRemote::HandlePacket_AllocateMemory(const char *p) {
       }
 
       if (success) {
-        nub_addr_t addr =
-            DNBProcessMemoryAllocate(m_ctx.ProcessID(), size, permissions);
+        addr = DNBProcessMemoryAllocate(m_ctx.ProcessID(), size, permissions,
+                                        addr);
         if (addr != INVALID_NUB_ADDRESS) {
           std::ostringstream ostrm;
           ostrm << RAW_HEXBASE << addr;
