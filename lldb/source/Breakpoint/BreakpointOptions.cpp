@@ -106,8 +106,8 @@ const char *BreakpointOptions::g_option_names[(
 BreakpointOptions::BreakpointOptions(bool all_flags_set)
     : m_callback(nullptr), m_baton_is_command_baton(false),
       m_callback_is_synchronous(false), m_enabled(true), m_one_shot(false),
-      m_ignore_count(0), m_condition_text_hash(0) m_auto_continue(false),
-      m_set_flags(0), m_inject_condition(false), {
+      m_ignore_count(0), m_condition_text_hash(0), m_auto_continue(false),
+      m_set_flags(0), m_inject_condition(false) {
   if (all_flags_set)
     m_set_flags.Set(~((Flags::ValueType)0));
 }

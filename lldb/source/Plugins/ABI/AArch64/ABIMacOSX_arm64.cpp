@@ -43,8 +43,23 @@ bool ABIMacOSX_arm64::GetFramePointerRegister(const char *&name) {
   return true;
 }
 
-// https://github.com/apple/darwin-xnu/blob/main/osfmk/arm64/cswitch.s
-// https://github.com/RTEMS/rtems/blob/master/cpukit/score/cpu/aarch64/cpu_asm.S
+llvm::Expected<std::string> ABIMacOSX_arm64::GetRegisterName(uint32_t num) {
+  if (!m_mc_register_info_up)
+    return llvm::createStringError(
+        llvm::formatv("Failed to get register name for register #{0}: No "
+                      "register information in ABI.",
+                      num));
+
+  if (num > m_mc_register_info_up->getNumRegs())
+    return llvm::createStringError(
+        llvm::formatv("Failed to get register name for register #{0}: Invalid "
+                      "register number.",
+                      num));
+
+  llvm::Twine reg_name("x" + llvm::Twine(num));
+  return GetMCName(reg_name.str());
+}
+
 bool ABIMacOSX_arm64::SetupFastConditionalBreakpointTrampoline(
     BreakpointInjectedSite *bp_injected_site) {
   Log *log = GetLog(LLDBLog::JITLoader);
@@ -76,22 +91,33 @@ bool ABIMacOSX_arm64::SetupFastConditionalBreakpointTrampoline(
      << "      R\"(\n";
 
   /// Saving General Purpose Registers.
-  ss << "           stp x0, x1, [sp, #-16]!\n"
-     << "           stp x2, x3, [sp, #-16]!\n"
-     << "           stp x4, x5, [sp, #-16]!\n"
-     << "           stp x6, x7, [sp, #-16]!\n"
-     << "           stp x8, x9, [sp, #-16]!\n"
-     << "           stp x10, x11, [sp, #-16]!\n"
-     << "           stp x12, x13, [sp, #-16]!\n"
-     << "           stp x14, x15, [sp, #-16]!\n"
-     << "           stp x16, x17, [sp, #-16]!\n"
-     << "           stp x18, x19, [sp, #-16]!\n"
-     << "           stp x20, x21, [sp, #-16]!\n"
-     << "           stp x22, x23, [sp, #-16]!\n"
-     << "           stp x24, x25, [sp, #-16]!\n"
-     << "           stp x26, x27, [sp, #-16]!\n"
-     << "           stp x28, x29, [sp, #-16]!\n"
-     << "           stp x30, x31, [sp, #-16]!\n";
+  ss << "           // Allocate space for the register_context struct on the "
+        "stack\n"
+     << "           sub     sp, sp, #0x100\n"
+     << "\n"
+     << "           // Save registers into the allocated space\n"
+     << "           stp     x0, x1, [sp, #0x00]\n"
+     << "           stp     x2, x3, [sp, #0x10]\n"
+     << "           stp     x4, x5, [sp, #0x20]\n"
+     << "           stp     x6, x7, [sp, #0x30]\n"
+     << "           stp     x8, x9, [sp, #0x40]\n"
+     << "           stp     x10, x11, [sp, #0x50]\n"
+     << "           stp     x12, x13, [sp, #0x60]\n"
+     << "           stp     x14, x15, [sp, #0x70]\n"
+     << "           stp     x16, x17, [sp, #0x80]\n"
+     << "           stp     x18, x19, [sp, #0x90]\n"
+     << "           stp     x20, x21, [sp, #0xa0]\n"
+     << "           stp     x22, x23, [sp, #0xb0]\n"
+     << "           stp     x24, x25, [sp, #0xc0]\n"
+     << "           stp     x26, x27, [sp, #0xd0]\n"
+     << "           stp     x28, x29, [sp, #0xe0]\n"
+     << "           str     x30, [sp, #0xf0]\n"
+     << "\n"
+     << "           // Store the stack pointer value (before any allocation) "
+        "at the end of the context structure\n"
+     << "           mov     x1, sp\n"
+     << "           add     x1, x1, #0x100\n"
+     << "           str     x1, [sp, #0xf8]\n";
 
   /// Pass register context address to argument structure builder.
   /// Allocating argument structure on the stack.
@@ -101,38 +127,44 @@ bool ABIMacOSX_arm64::SetupFastConditionalBreakpointTrampoline(
   /// Call condition expression evaluator.
   /// Restore General Purpose Registers.
 
-  size_t variable_count = bp_injected_site->GetVariableCount();
-  size_t address_size_in_byte =
-      bp_injected_site->GetTargetSP()->GetArchitecture().GetAddressByteSize();
   const lldb::addr_t util_func_addr =
       bp_injected_site->GetUtilityFunctionAddress();
   const lldb::addr_t cond_expr_addr =
       bp_injected_site->GetConditionExpressionAddress();
 
   ss << "           mov x0, sp\n"
-     << "           sub sp, sp, #" << variable_count * address_size_in_byte
+     << "           sub sp, sp, #" << bp_injected_site->GetArgsStructSize()
      << "\n"
      << "           mov x1, sp\n"
      << "           ldr x17, =0x" << std::hex << util_func_addr << "\n"
      << "           blr x17\n"
      << "           ldr x17, =0x" << std::hex << cond_expr_addr << "\n"
      << "           blr x17\n"
-     << "           ldp x30, x31, [sp, #16]!\n"
-     << "           ldp x28, x29, [sp, #16]!\n"
-     << "           ldp x26, x27, [sp, #16]!\n"
-     << "           ldp x24, x25, [sp, #16]!\n"
-     << "           ldp x22, x23, [sp, #16]!\n"
-     << "           ldp x20, x21, [sp, #16]!\n"
-     << "           ldp x18, x19, [sp, #16]!\n"
-     << "           ldp x16, x17, [sp, #16]!\n"
-     << "           ldp x14, x15, [sp, #16]!\n"
-     << "           ldp x12, x13, [sp, #16]!\n"
-     << "           ldp x10, x11, [sp, #16]!\n"
-     << "           ldp x8, x9, [sp, #16]!\n"
-     << "           ldp x6, x7, [sp, #16]!\n"
-     << "           ldp x4, x5, [sp, #16]!\n"
-     << "           ldp x2, x3, [sp, #16]!\n"
-     << "           ldp x0, x1, [sp, #16]!\n";
+     << "\n"
+     << "           // Restore registers from the stack in reverse order\n"
+     << "           ldr     x30, [sp, #0xf0]\n"
+     << "           ldp     x28, x29, [sp, #0xe0]\n"
+     << "           ldp     x26, x27, [sp, #0xd0]\n"
+     << "           ldp     x24, x25, [sp, #0xc0]\n"
+     << "           ldp     x22, x23, [sp, #0xb0]\n"
+     << "           ldp     x20, x21, [sp, #0xa0]\n"
+     << "           ldp     x18, x19, [sp, #0x90]\n"
+     << "           ldp     x16, x17, [sp, #0x80]\n"
+     << "           ldp     x14, x15, [sp, #0x70]\n"
+     << "           ldp     x12, x13, [sp, #0x60]\n"
+     << "           ldp     x10, x11, [sp, #0x50]\n"
+     << "           ldp     x8, x9, [sp, #0x40]\n"
+     << "           ldp     x6, x7, [sp, #0x30]\n"
+     << "           ldp     x4, x5, [sp, #0x20]\n"
+     << "           ldp     x2, x3, [sp, #0x10]\n"
+     << "           ldp     x0, x1, [sp, #0x00]\n"
+     << "\n"
+     << "           ldr     x1, [sp, #0xf8]\n"
+     << "           mov     sp, x1\n"
+     << "           \n"
+     << "           // Free allocated stack memory for register_context "
+        "structure\n"
+     << "           add     sp, sp, #0x100\n";
 
   /// Allocate space to copy inferior instructions and jump back to user's code
   ss << "           nop\n"
@@ -178,16 +210,16 @@ bool ABIMacOSX_arm64::SetupFastConditionalBreakpointTrampoline(
 
   /// Run copied instructions and jump back to user's code
   /// FIXME: Disassemble trampoline and detect first `nop` instr
-  const lldb::offset_t copied_instr_offset = 39 * aarch64_instr_size;
+  const lldb::offset_t copied_instr_offset = 45 * aarch64_instr_size;
+  const intptr_t source_branch_target =
+      bp_load_addr - trampoline_addr + copied_instr_offset + aarch64_instr_size;
+  //  const bool bp_before_trampoline = branch_to_source_target < 0;
   ss = std::stringstream();
   ss << "__attribute__((naked,noreturn)) void $__lldb_emit_branch_to_source() "
         "{\n"
      << "    __asm__ (\n"
      << "      R\"(\n"
-     << "           b 0x" << std::hex
-     << bp_load_addr - trampoline_addr + copied_instr_offset +
-            aarch64_instr_size
-     << "\n"
+     << "           b " << source_branch_target << "\n"
      << "        )\");\n"
      << "}";
 
@@ -211,12 +243,13 @@ bool ABIMacOSX_arm64::SetupFastConditionalBreakpointTrampoline(
   }
 
   /// Patch inferior to branch to trampoline
+  const intptr_t trampoline_branch_target = trampoline_addr - bp_load_addr;
   ss = std::stringstream();
   ss << "__attribute__((naked,noreturn)) void "
         "$__lldb_emit_branch_to_trampoline() {\n"
      << "    __asm__ (\n"
      << "      R\"(\n"
-     << "           b 0x" << std::hex << trampoline_addr - bp_load_addr << "\n"
+     << "           b " << trampoline_branch_target << "\n"
      << "        )\");\n"
      << "}";
 
@@ -610,7 +643,7 @@ bool ABIMacOSX_arm64::CreateDefaultUnwindPlan(UnwindPlan &unwind_plan) {
   return true;
 }
 
-// This defines the CFA as rsp+256
+// This defines the CFA as sp
 // The saved pc is at value
 
 bool ABIMacOSX_arm64::CreateTrampolineUnwindPlan(UnwindPlan &unwind_plan,
@@ -618,26 +651,24 @@ bool ABIMacOSX_arm64::CreateTrampolineUnwindPlan(UnwindPlan &unwind_plan,
   unwind_plan.Clear();
   unwind_plan.SetRegisterKind(eRegisterKindDWARF);
 
-  uint32_t sp_reg_num = arm64_dwarf::sp;
   uint32_t pc_reg_num = arm64_dwarf::pc;
+  uint32_t sp_reg_num = arm64_dwarf::sp;
 
   UnwindPlan::RowSP row(new UnwindPlan::Row);
-  const int32_t ptr_size = 8;
 
-  row->GetCFAValue().SetIsRegisterPlusOffset(sp_reg_num, 32 * ptr_size);
+  row->GetCFAValue().SetIsRegisterPlusOffset(sp_reg_num, 0x100);
   row->SetOffset(0);
-  //  row->SetUnspecifiedRegistersAreUndefined(true);
 
-  // MARK: The PC is set to return address + 1 because the unwinder will usually
-  // try to decrement the PC to show the current instruction.
-  row->SetRegisterLocationToConstantValue(pc_reg_num, return_address + 1, true);
-  row->SetRegisterLocationToIsCFAPlusOffset(sp_reg_num, 0, true);
+  // The original SP for the caller frame can be recovered as SP + 0x100 + 0x10
+  row->SetRegisterLocationToIsCFAPlusOffset(sp_reg_num, 0x110, true);
+
+  row->SetRegisterLocationToConstantValue(pc_reg_num, return_address, true);
 
   unwind_plan.AppendRow(row);
   unwind_plan.SetSourceName("arm64-apple-darwin trampoline unwind plan");
   unwind_plan.SetSourcedFromCompiler(eLazyBoolNo);
   unwind_plan.SetUnwindPlanValidAtAllInstructions(eLazyBoolNo);
-  //  unwind_plan.SetUnwindPlanForSignalTrap(eLazyBoolNo);
+  unwind_plan.SetUnwindPlanForSignalTrap(eLazyBoolNo);
   return true;
 }
 

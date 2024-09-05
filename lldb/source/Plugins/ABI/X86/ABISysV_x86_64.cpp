@@ -77,11 +77,10 @@ ABISysV_x86_64::GetDebugTrapOpcode() {
       {0x0B, 0x0F}, // ud2 = 0x0f0b
   };
 
-  return llvm::makeArrayRef(g_aarch64_opcode);
+  return llvm::ArrayRef(g_aarch64_opcode);
 }
 
 bool ABISysV_x86_64::SetupFastConditionalBreakpointTrampoline(
-    size_t instrs_size, uint8_t *instrs_data,
     BreakpointInjectedSite *bp_injected_site) {
   Log *log = GetLog(LLDBLog::JITLoader);
 
@@ -105,6 +104,9 @@ bool ABISysV_x86_64::SetupFastConditionalBreakpointTrampoline(
 
   size_t context_size =
       x86_64_saved_register_size + x86_64_volatile_register_size;
+
+  size_t instrs_size = 0;
+  uint8_t *instrs_data = nullptr;
 
   /// Saving General Purpose Registers.
   size_t expected_trampoline_size = context_size;

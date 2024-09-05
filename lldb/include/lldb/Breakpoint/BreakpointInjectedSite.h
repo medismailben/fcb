@@ -14,6 +14,7 @@
 #include "lldb/Breakpoint/BreakpointLocation.h"
 #include "lldb/Breakpoint/BreakpointLocationCollection.h"
 #include "lldb/Breakpoint/BreakpointSite.h"
+#include "lldb/Breakpoint/StopPointSiteList.h"
 #include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Expression/UserExpression.h"
 #include "lldb/Expression/UtilityFunction.h"
@@ -22,8 +23,8 @@
 #include "lldb/Target/Platform.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Utility/DataEncoder.h"
-#include "lldb/Utility/Log.h"
 #include "lldb/Utility/LLDBLog.h"
+#include "lldb/Utility/Log.h"
 
 #include "llvm/DebugInfo/DWARF/DWARFExpression.h"
 
@@ -102,10 +103,17 @@ public:
     /// \param[in] address_size
     ///    The size in bytes for the address of the current architecture.
     ///
+    /// \param[in] expr
+    ///    The DWARF expression list for the variable.
+    ///
+    /// \param[in] frame_base_expr
+    ///    The DWARF expression list for the frame base register.
+    ///
     VariableMetadata(std::string name, size_t size, llvm::DataExtractor data,
-                     uint8_t address_size, DWARFExpressionList expr)
+                     uint8_t address_size, DWARFExpressionList expr,
+                     DWARFExpressionList &frame_base_expr)
         : name(std::move(name)), size(size), dwarf(data, address_size),
-          expr_list(expr) {}
+          expr_list(expr), frame_base_expr_list(frame_base_expr) {}
 
     /// The variable name.
     std::string name;
@@ -113,9 +121,13 @@ public:
     size_t size;
     /// The variable DWARF Expression.
     llvm::DWARFExpression dwarf;
-    /// The LLDB DWARF expression list.
+    /// The LLDB DWARF variable expression list.
     DWARFExpressionList expr_list;
+    /// The LLDB DWARF frame base register expression list.
+    DWARFExpressionList frame_base_expr_list;
   };
+
+  size_t GetArgsStructSize() const { return m_args_struct_size; }
 
 private:
   friend class Process;
@@ -126,17 +138,13 @@ private:
   /// DWARF Expression from the DataExtractor containing the DWARF Operation
   /// and its operands.
   ///
-  /// \param[in] list
-  ///    The list of the breakpoint sites already set.
-  ///
   /// \param[in] owner
   ///    The breakpoint location holding this breakpoint site.
   ///
   /// \param[in] addr
   ///    The breakpoint site load address.
   ///
-  BreakpointInjectedSite(BreakpointSiteList *list,
-                         const lldb::BreakpointLocationSP &owner,
+  BreakpointInjectedSite(const lldb::BreakpointLocationSP &owner,
                          lldb::addr_t addr);
 
   /// Scan the JIT-ed condition expression instructions and look for the
@@ -181,6 +189,8 @@ private:
   ///     The source code needed to copy the variable in the argument structure.
   std::string ParseDWARFExpression(size_t index, Status &error);
 
+  llvm::DataExtractor GetLLVMDataExtractor(const DataExtractor &lldb_data);
+
 private:
   /// The target that hold the breakpoint.
   lldb::TargetSP m_target_sp;
@@ -198,6 +208,8 @@ private:
   lldb::UtilityFunctionSP m_create_args_struct_function_sp;
   /// The variable metadata vector.
   std::vector<VariableMetadata> m_metadatas;
+  /// The size of the JIT-ed argument structure.
+  size_t m_args_struct_size;
 };
 
 } // namespace lldb_private

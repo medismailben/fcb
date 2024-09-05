@@ -941,7 +941,9 @@ size_t StackFrameList::GetStatus(Stream &strm, uint32_t first_frame,
   else
     last_frame = first_frame + num_frames;
 
+  // FIXME: Right a recognizer for this
   StackFrameSP selected_frame_sp =
+      m_thread.GetSelectedFrame(DoNoSelectMostRelevantFrame);
 
   StackFrameListSP sfl_sp = m_thread.GetStackFrameList();
 

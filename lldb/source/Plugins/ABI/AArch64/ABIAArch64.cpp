@@ -39,7 +39,7 @@ llvm::Expected<ABIAArch64::OpcodeArray> ABIAArch64::GetDebugTrapOpcode() {
       {0x00, 0x00, 0x3e, 0xd4}, // brk #0xf000 = 0xd43e0000
   };
 
-  return llvm::makeArrayRef(g_aarch64_opcode);
+  return llvm::ArrayRef(g_aarch64_opcode);
 }
 
 lldb::addr_t ABIAArch64::FixCodeAddress(lldb::addr_t pc) {
@@ -88,6 +88,7 @@ std::string ABIAArch64::GetMCName(std::string reg) {
   MapRegisterName(reg, "v", "q");
   MapRegisterName(reg, "x29", "fp");
   MapRegisterName(reg, "x30", "lr");
+  MapRegisterName(reg, "x31", "sp");
   return reg;
 }
 

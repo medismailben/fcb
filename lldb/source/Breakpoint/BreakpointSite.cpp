@@ -24,10 +24,9 @@ BreakpointSite::BreakpointSite(const BreakpointLocationSP &constituent,
       m_type(eSoftware), // Process subclasses need to set this correctly using
                          // SetType()
       m_saved_opcode(), m_trap_opcode(),
-      m_enabled(false) // Need to create it disabled, so the first enable turns
-                       // it on.
-      m_kind(kind)
-{
+      m_enabled(false), // Need to create it disabled, so the first enable turns
+                        // it on.
+      m_kind(kind) {
   m_constituents.Add(constituent);
 }
 

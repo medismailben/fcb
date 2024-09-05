@@ -1020,6 +1020,8 @@ const char *Breakpoint::BreakpointEventTypeAsCString(BreakpointEventType type) {
     case eBreakpointEventTypeIgnoreChanged: return "ignore count changed";
     case eBreakpointEventTypeThreadChanged: return "thread changed";
     case eBreakpointEventTypeAutoContinueChanged: return "autocontinue changed";
+    case lldb::eBreakpointEventTypeInjectedCondition:
+      return "injected condition changed";
   };
   llvm_unreachable("Fully covered switch above!");
 }

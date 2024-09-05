@@ -1634,15 +1634,14 @@ Status Process::EnableBreakpointSiteByID(lldb::user_id_t break_id) {
   return error;
 }
 
-lldb::break_id_t
-Process::FallbackToRegularBreakpointSite(const BreakpointLocationSP &owner,
-                                         bool use_hardware, Log *log,
-                                         const char *error) {
-  LLDB_LOG(log, error);
+lldb::break_id_t Process::FallbackToRegularBreakpointSite(
+    const BreakpointLocationSP &constituent, bool use_hardware, Log *log,
+    llvm::Error error) {
+  LLDB_LOG_ERROR(log, std::move(error), "{0}");
   LLDB_LOG(log, "Disabling JIT-ed condition and falling back to regular "
                 "conditional breakpoint");
-  owner->SetInjectCondition(false);
-  return CreateBreakpointSite(owner, use_hardware);
+  constituent->SetInjectCondition(false);
+  return CreateBreakpointSite(constituent, use_hardware);
 }
 
 lldb::break_id_t
@@ -1708,10 +1707,16 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &constituent,
 
     bp_site_sp = m_breakpoint_site_list.FindByAddress(load_addr);
 
+    auto fallback_with_error = [this, &constituent, &use_hardware,
+                                &log](const llvm::StringRef error_msg) {
+      return FallbackToRegularBreakpointSite(
+          constituent, use_hardware, log, llvm::createStringError(error_msg));
+    };
+
     if (bp_site_sp) {
       bp_site_sp->AddConstituent(constituent);
 
-      if (owner->GetInjectCondition()) {
+      if (constituent->GetInjectCondition()) {
         BreakpointSite *bp_site = bp_site_sp.get();
 
         BreakpointInjectedSite *bp_injected_site_sp =
@@ -1719,114 +1724,40 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &constituent,
 
         std::string error;
 
-        if (!bp_injected_site_sp->BuildConditionExpression()) {
-          error = "FCB: Couldn't build the condition expression";
-          return FallbackToRegularBreakpointSite(owner, use_hardware, log,
-                                                 error.c_str());
-        }
+        // FIXME: Make sure we don't need to do anything else here.
+        if (!bp_injected_site_sp->BuildConditionExpression())
+          return fallback_with_error("Couldn't build the condition expression");
       }
 
       constituent->SetBreakpointSite(bp_site_sp);
       return bp_site_sp->GetID();
     } else {
       ABISP abi_sp = GetABI();
-      ABISP abi_sp = GetABI();
-      std::string error;
 
-      // TODO: Make lambda to refactor error code.
-      if (!abi_sp) {
-        error = "FCB: Couldn't fetch target's ABI";
-        return FallbackToRegularBreakpointSite(owner, use_hardware, log,
-                                               error.c_str());
-      }
+      if (!abi_sp)
+        return fallback_with_error("Couldn't fetch target's ABI");
 
-      if (!abi_sp->SupportsFCB()) {
-        error = "FCB: ABI doesn't JIT breakpoints";
-        return FallbackToRegularBreakpointSite(owner, use_hardware, log,
-                                               error.c_str());
-      }
+      if (!abi_sp->SupportsFCB())
+        return fallback_with_error(
+            "Current ABI doesn't creating JIT-ed breakpoints");
 
-      if (owner->GetInjectCondition() && abi_sp->SupportsFCB()) {
+      if (constituent->GetInjectCondition()) {
         // Build user expression's IR from condition
-        BreakpointInjectedSite *bp_injected_site = new BreakpointInjectedSite(
-            &m_breakpoint_site_list, owner, load_addr);
+        BreakpointInjectedSite *bp_injected_site =
+            new BreakpointInjectedSite(constituent, load_addr);
 
         // Setup a call before the copied instructions
-        if (!bp_injected_site->BuildConditionExpression()) {
-          error = "FCB: Couldn't build the condition expression";
-          return FallbackToRegularBreakpointSite(owner, use_hardware, log,
-                                                 error.c_str());
-        }
+        if (!bp_injected_site->BuildConditionExpression())
+          return fallback_with_error("Couldn't build the condition expression");
 
-        if (!abi_sp->SetupFastConditionalBreakpointTrampoline(
-                bp_injected_site)) {
-          error = "FCB: Couldn't setup trampoline";
+        if (!abi_sp->SetupFastConditionalBreakpointTrampoline(bp_injected_site))
+          return fallback_with_error("Couldn't setup trampoline");
 
-          if (!abi_sp->SupportsFCB()) {
-            error = "FCB: ABI doesn't JIT breakpoints";
-            return FallbackToRegularBreakpointSite(owner, use_hardware, log,
-                                                   error.c_str());
-          }
-
-          addr_t trap_addr = bp_injected_site->GetTrapAddress();
-
-          if (owner->GetInjectCondition() && abi_sp->SupportsFCB()) {
-            // Build user expression's IR from condition
-            BreakpointInjectedSite *bp_injected_site =
-                new BreakpointInjectedSite(constituent, owner, load_addr);
-
-            // Setup a call before the copied instructions
-            if (!bp_injected_site->BuildConditionExpression()) {
-              error = "FCB: Couldn't build the condition expression";
-              return FallbackToRegularBreakpointSite(owner, use_hardware, log,
-                                                     error.c_str());
-            }
-
-            size_t instrs_size = SaveInstructions(owner->GetAddress());
-
-            if (!instrs_size) {
-              error = "FCB: Couldn't save instructions";
-
-              return FallbackToRegularBreakpointSite(owner, use_hardware, log,
-                                                     error.c_str());
-            }
-
-            if (!abi_sp->SetupFastConditionalBreakpointTrampoline(
-                    instrs_size, m_overwritten_instructions,
-                    bp_injected_site)) {
-              error = "FCB: Couldn't setup trampoline";
-
-              return FallbackToRegularBreakpointSite(owner, use_hardware, log,
-                                                     error.c_str());
-            }
-
-            addr_t trap_addr = bp_injected_site->GetTrapAddress();
-
-            if (trap_addr == LLDB_INVALID_ADDRESS) {
-              error = "FCB: Couldn't get trap address";
-              return FallbackToRegularBreakpointSite(owner, use_hardware, log,
-                                                     error.c_str());
-            }
-
-            bp_site_sp.reset(bp_jitted_site);
-            bp_site_sp->AddOwner(owner);
-          } else {
-
-            bp_site_sp->AddOwner(owner);
-          } else {
-          bp_site_sp.reset(
-                           new BreakpointSite(constituent, load_addr, use_hardware));
-        }
-
-        // bp_site_sp.reset(bp_jitted_site);
-        bp_site_sp.reset(new BreakpointSite(&m_breakpoint_site_list, owner,
-                                            trap_addr, use_hardware));
-
-        bp_site_sp->AddOwner(owner);
-        } else {
-          bp_site_sp.reset(new BreakpointSite(&m_breakpoint_site_list, owner,
-                                              load_addr, use_hardware));
-        }
+        bp_site_sp.reset(bp_injected_site);
+        bp_site_sp->AddConstituent(constituent);
+      } else {
+        bp_site_sp.reset(
+            new BreakpointSite(constituent, load_addr, use_hardware));
       }
 
       if (bp_site_sp) {
@@ -1846,6 +1777,7 @@ Process::CreateBreakpointSite(const BreakpointLocationSP &constituent,
           }
         }
       }
+    }
   }
   // We failed to enable the breakpoint
   return LLDB_INVALID_BREAK_ID;

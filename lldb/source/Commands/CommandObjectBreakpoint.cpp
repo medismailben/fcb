@@ -102,8 +102,9 @@ public:
     } break;
     case 'I': {
       if (!m_bp_opts.IsOptionSet(BreakpointOptions::eCondition))
-        error.SetErrorString("inject-condition option only available for "
-                             "conditional breakpoints");
+        error =
+            Status::FromErrorString("inject-condition option only available "
+                                    "for conditional breakpoints");
       else
         m_bp_opts.SetInjectCondition(true);
     } break;

@@ -149,8 +149,7 @@ public:
   ///    \b true If building the Trampoline succeeded, \b false otherwise.
   ///
   bool SetupFastConditionalBreakpointTrampoline(
-      size_t instrs_size, uint8_t *instrs_data,
-      lldb_private::BreakpointInjectedSite *bp_inject_site);
+      lldb_private::BreakpointInjectedSite *bp_inject_site) override;
 
   size_t GetJumpSize() override { return x86_64_jmp_size; }
 

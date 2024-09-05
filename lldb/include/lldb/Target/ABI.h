@@ -16,6 +16,7 @@
 #include "lldb/Symbol/UnwindPlan.h"
 #include "lldb/Target/DynamicRegisterInfo.h"
 #include "lldb/Utility/Status.h"
+#include "lldb/Utility/UnimplementedError.h"
 #include "lldb/lldb-private.h"
 
 #include "llvm/ADT/ArrayRef.h"
@@ -158,6 +159,9 @@ public:
 
   virtual bool GetPointerReturnRegister(const char *&name) { return false; }
   virtual bool GetFramePointerRegister(const char *&name) { return false; }
+  virtual llvm::Expected<std::string> GetRegisterName(uint32_t num) {
+    return llvm::make_error<UnimplementedError>();
+  }
 
   /// Allocate a memory stub for the fast condition breakpoint trampoline, and
   /// build it by saving the register context, calling the argument structure

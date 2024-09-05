@@ -412,12 +412,12 @@ private:
   /// Its hash, so that locations know when the condition is updated.
   size_t m_condition_text_hash;
   /// If set, inject breakpoint condition into process.
-  bool m_inject_condition;
-  /// If set, auto-continue from breakpoint.
   bool m_auto_continue;
   /// Which options are set at this level.
   /// Drawn from BreakpointOptions::SetOptionsFlags.
   Flags m_set_flags;
+  bool m_inject_condition;
+  /// If set, auto-continue from breakpoint.
 };
 
 } // namespace lldb_private

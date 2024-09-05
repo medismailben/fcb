@@ -76,6 +76,7 @@ bool RegInfoBasedABI::GetRegisterInfoByName(llvm::StringRef name,
 lldb::WritableDataBufferSP ABI::EmitAssembly(llvm::StringRef name,
                                              std::stringstream &expr,
                                              ExecutionContext exe_ctx) {
+  Log *log = GetLog(LLDBLog::JITLoader);
   std::string symbol_name = "$__lldb_";
   symbol_name += name.data();
 
@@ -86,8 +87,7 @@ lldb::WritableDataBufferSP ABI::EmitAssembly(llvm::StringRef name,
 
   if (!utility_fn_or_error) {
     std::string error_str = llvm::toString(utility_fn_or_error.takeError());
-    Log *log = GetLog(LLDBLog::JITLoader);
-    LLDB_LOG(log, "Error creating utility function: {}.", error_str);
+    LLDB_LOG(log, "Error creating utility function: {0}.", error_str);
     return nullptr;
   }
 
@@ -107,7 +107,7 @@ lldb::WritableDataBufferSP ABI::EmitAssembly(llvm::StringRef name,
                                                   buffer->GetByteSize(), error);
 
   if (memory_read != jit_addr_range.GetByteSize() || error.Fail()) {
-    error.SetErrorString("Couldn't read jit memory");
+    error = Status::FromErrorString("Couldn't read jit memory");
     return nullptr;
   }
 
@@ -118,10 +118,11 @@ lldb::WritableDataBufferSP ABI::EmitAssembly(llvm::StringRef name,
   if (!dis)
     return nullptr;
 
+  StreamString s;
   Debugger &dbg = target.GetDebugger();
-
-  dis->PrintInstructions(dbg, arch, exe_ctx, false, 0, 0,
-                         *dbg.GetAsyncOutputStream());
+  dis->PrintInstructions(dbg, arch, exe_ctx, false, 0, 0, s);
+  if (log)
+    log->PutString(s.GetString());
 
   return buffer;
 }
@@ -131,7 +132,7 @@ lldb::ModuleSP ABI::CreateModuleForFastConditionalBreakpointTrampoline(
   Log *log = GetLog(LLDBLog::JITLoader);
 
   if (!SupportsFCB()) {
-    LLDB_LOG(log, "JIT: ABI {} does not implement JIT-ed breakpoint condition",
+    LLDB_LOG(log, "JIT: ABI {0} does not implement JIT-ed breakpoint condition",
              GetPluginName().data());
     return nullptr;
   }
@@ -167,7 +168,7 @@ lldb::ModuleSP ABI::CreateModuleForFastConditionalBreakpointTrampoline(
       unwind_table.GetFuncUnwindersContainingAddress(address, sc);
 
   if (!func_unwinders_sp) {
-    LLDB_LOG(log, "JIT: Couldn't find any function unwinder for {} ({})",
+    LLDB_LOG(log, "JIT: Couldn't find any function unwinder for {0} ({1})",
              symbol->GetName().AsCString(), address);
     return nullptr;
   }

@@ -17,16 +17,17 @@
 #include "lldb/Target/ABI.h"
 
 #include "llvm/Support/DataExtractor.h"
+#include "llvm/Support/FormatAdapters.h"
 
 using namespace lldb;
 using namespace lldb_private;
 
 BreakpointInjectedSite::BreakpointInjectedSite(
-    BreakpointSiteList *list, const BreakpointLocationSP &owner,
-    lldb::addr_t addr)
-    : BreakpointSite(list, owner, addr, false, eKindBreakpointInjectedSite),
+    const BreakpointLocationSP &owner, lldb::addr_t addr)
+    : BreakpointSite(owner, addr, false, eKindBreakpointInjectedSite),
       m_target_sp(owner->GetTarget().shared_from_this()),
-      m_real_addr(owner->GetAddress()), m_trap_addr(LLDB_INVALID_ADDRESS) {}
+      m_real_addr(owner->GetAddress()), m_trap_addr(LLDB_INVALID_ADDRESS),
+      m_args_struct_size(0) {}
 
 BreakpointInjectedSite::~BreakpointInjectedSite() {}
 
@@ -41,11 +42,10 @@ bool BreakpointInjectedSite::BuildConditionExpression(void) {
 
   LanguageType language = eLanguageTypeUnknown;
 
-  for (BreakpointLocationSP loc_sp : m_owners.BreakpointLocations()) {
-
+  for (BreakpointLocationSP loc_sp : m_constituents.BreakpointLocations()) {
     // Stop building the expression if a location condition is not JIT-ed
     if (!loc_sp->GetInjectCondition()) {
-      LLDB_LOG(log, "FCB: BreakpointLocation ({}) condition is not JIT-ed",
+      LLDB_LOG(log, "FCB: BreakpointLocation ({0}) condition is not JIT-ed",
                loc_sp->GetConditionText());
       return false;
     }
@@ -61,9 +61,9 @@ bool BreakpointInjectedSite::BuildConditionExpression(void) {
     if (language == eLanguageTypeSwift) {
       trap += "Builtin.int_trap()";
     } else if (Language::LanguageIsCFamily(language)) {
-      trap = "__builtin_debugtrap()";
+      trap = "__builtin_trap()";
     } else {
-      LLDB_LOG(log, "FCB: Language {} not supported",
+      LLDB_LOG(log, "FCB: Language {0} not supported",
                Language::GetNameForLanguageType(language));
       m_condition_expression_sp.reset();
       return false;
@@ -79,7 +79,7 @@ bool BreakpointInjectedSite::BuildConditionExpression(void) {
 
   condition_text += trap + ";\n    }";
 
-  LLDB_LOGV(log, "Injected Condition:\n{}\n", condition_text.c_str());
+  LLDB_LOGV(log, "Injected Condition:\n{0}\n", condition_text.c_str());
 
   DiagnosticManager diagnostics;
 
@@ -90,7 +90,7 @@ bool BreakpointInjectedSite::BuildConditionExpression(void) {
 
   m_condition_expression_sp.reset(m_target_sp->GetUserExpressionForLanguage(
       condition_text, llvm::StringRef(), language, Expression::eResultTypeAny,
-      EvaluateExpressionOptions(options), nullptr, error));
+      options, nullptr, error));
 
   if (error.Fail()) {
     if (log)
@@ -127,7 +127,7 @@ bool BreakpointInjectedSite::BuildConditionExpression(void) {
   if (!m_condition_expression_sp->Parse(diagnostics, m_owner_exe_ctx,
                                         execution_policy, keep_result_in_memory,
                                         generate_debug_info)) {
-    LLDB_LOG(log, "Couldn't parse conditional expression:\n{}",
+    LLDB_LOG(log, "Couldn't parse conditional expression:\n{0}",
              diagnostics.GetString().c_str());
     m_condition_expression_sp.reset();
     return false;
@@ -148,24 +148,25 @@ bool BreakpointInjectedSite::BuildConditionExpression(void) {
 
   if (memory_read != jit_addr_range.GetByteSize() || error.Fail()) {
     m_condition_expression_sp.reset();
-    error.SetErrorString("Couldn't read jit memory");
+    error = Status::FromErrorString("Couldn't read jit memory");
     return false;
   }
 
   PlatformSP platform_sp = m_target_sp->GetPlatform();
 
   if (!platform_sp) {
-    error.SetErrorString("Couldn't get running platform");
+    error = Status::FromErrorString("Couldn't get running platform");
     return false;
   }
 
   if (!platform_sp->GetSoftwareBreakpointTrapOpcode(*m_target_sp.get(), this)) {
-    error.SetErrorString("Couldn't get current architecture trap opcode");
+    error = Status::FromErrorString(
+        "Couldn't get current architecture trap opcode");
     return false;
   }
 
   if (!ResolveTrapAddress(buffer, memory_read)) {
-    error.SetErrorString("Couldn't find trap in jitter expression");
+    error = Status::FromErrorString("Couldn't find trap in jitter expression");
     return false;
   }
 
@@ -243,13 +244,24 @@ bool BreakpointInjectedSite::ResolveTrapAddress(void *jit, size_t size) {
   return false;
 }
 
+llvm::DataExtractor
+BreakpointInjectedSite::GetLLVMDataExtractor(const DataExtractor &lldb_data) {
+  llvm::StringRef data(lldb_data.PeekCStr(0));
+  bool is_le = (lldb_data.GetByteOrder() == lldb::eByteOrderLittle);
+  uint32_t data_addr_size = lldb_data.GetAddressByteSize();
+  llvm::DataExtractor llvm_data =
+      llvm::DataExtractor(data, is_le, data_addr_size);
+  return llvm_data;
+}
+
 bool BreakpointInjectedSite::GatherArgumentsMetadata() {
   Log *log = GetLog(LLDBLog::JITLoader);
 
-  LanguageType native_language = m_condition_expression_sp->Language();
+  LanguageType native_language =
+      m_condition_expression_sp->Language().AsLanguageType();
 
   if (!Language::LanguageIsCFamily(native_language)) {
-    LLDB_LOG(log, "FCB: {} language does not support Injected Conditional \
+    LLDB_LOG(log, "FCB: {0} language does not support Injected Conditional \
              Breapoint",
              Language::GetNameForLanguageType(native_language));
     return false;
@@ -291,7 +303,7 @@ bool BreakpointInjectedSite::GatherArgumentsMetadata() {
       return false;
     }
     if (!value) {
-      LLDB_LOG(log, "FCB: Couldn't find value for element {}/{}", i,
+      LLDB_LOG(log, "FCB: Couldn't find value for element {0}/{1}", i,
                num_elements);
       return false;
     }
@@ -322,23 +334,31 @@ bool BreakpointInjectedSite::GatherArgumentsMetadata() {
       return false;
     }
 
-    llvm::StringRef data(lldb_data.PeekCStr(0));
-    bool is_le = (lldb_data.GetByteOrder() == lldb::eByteOrderLittle);
-    uint32_t data_addr_size = lldb_data.GetAddressByteSize();
-    llvm::DataExtractor llvm_data =
-        llvm::DataExtractor(data, is_le, data_addr_size);
+    llvm::DataExtractor llvm_data = GetLLVMDataExtractor(lldb_data);
 
     uint8_t addr_size = m_target_sp->GetArchitecture().GetAddressByteSize();
 
     auto size = var_sp->GetType()->GetByteSize(m_target_sp.get());
     if (!size) {
-      LLDB_LOG(log, "FCB: Variable {} has invalid size",
+      LLDB_LOG(log, "FCB: Variable {0} has invalid size",
                var_sp->GetName().GetCString());
       return false;
     }
 
-    VariableMetadata metadata(expr_var->GetName().GetCString(), size.getValue(),
-                              llvm_data, addr_size, lldb_dwarf_exprs);
+    SymbolContextScope *owner_scope = var_sp->GetSymbolContextScope();
+    Function *func = nullptr;
+    if (!owner_scope ||
+        !(func = owner_scope->CalculateSymbolContextFunction())) {
+      // if Variable does not have SymbolContextScope or function, skip it
+      continue;
+    }
+
+    // FIXME: const ref ?
+    DWARFExpressionList frame_base_expr = func->GetFrameBaseExpression();
+
+    VariableMetadata metadata(expr_var->GetName().GetCString(), *size,
+                              llvm_data, addr_size, lldb_dwarf_exprs,
+                              frame_base_expr);
 
     m_metadatas.push_back(metadata);
   }
@@ -406,32 +426,146 @@ bool BreakpointInjectedSite::CreateArgumentsStructure() {
   return true;
 }
 
-std::string BreakpointInjectedSite::ParseDWARFExpression(size_t index,
+std::string BreakpointInjectedSite::ParseDWARFExpression(size_t expr_idx,
                                                          Status &error) {
   std::string expr;
   ABISP abi_sp = m_owner_exe_ctx.GetProcessSP()->GetABI();
 
-  for (auto op : m_metadatas[index].dwarf) {
+  size_t num_processed_vars = 0;
+
+  auto resolve_frame_base =
+      [&](llvm::DWARFExpression::Operation &op) -> llvm::Expected<std::string> {
+    uint8_t opcode = op.getCode();
+    switch (opcode) {
+    case llvm::dwarf::DW_OP_const1u:
+    case llvm::dwarf::DW_OP_const1s:
+    case llvm::dwarf::DW_OP_addr:
+      return std::to_string(op.getRawOperand(0));
+    case llvm::dwarf::DW_OP_reg0:
+    case llvm::dwarf::DW_OP_reg1:
+    case llvm::dwarf::DW_OP_reg2:
+    case llvm::dwarf::DW_OP_reg3:
+    case llvm::dwarf::DW_OP_reg4:
+    case llvm::dwarf::DW_OP_reg5:
+    case llvm::dwarf::DW_OP_reg6:
+    case llvm::dwarf::DW_OP_reg7:
+    case llvm::dwarf::DW_OP_reg8:
+    case llvm::dwarf::DW_OP_reg9:
+    case llvm::dwarf::DW_OP_reg10:
+    case llvm::dwarf::DW_OP_reg11:
+    case llvm::dwarf::DW_OP_reg12:
+    case llvm::dwarf::DW_OP_reg13:
+    case llvm::dwarf::DW_OP_reg14:
+    case llvm::dwarf::DW_OP_reg15:
+    case llvm::dwarf::DW_OP_reg16:
+    case llvm::dwarf::DW_OP_reg17:
+    case llvm::dwarf::DW_OP_reg18:
+    case llvm::dwarf::DW_OP_reg19:
+    case llvm::dwarf::DW_OP_reg20:
+    case llvm::dwarf::DW_OP_reg21:
+    case llvm::dwarf::DW_OP_reg22:
+    case llvm::dwarf::DW_OP_reg23:
+    case llvm::dwarf::DW_OP_reg24:
+    case llvm::dwarf::DW_OP_reg25:
+    case llvm::dwarf::DW_OP_reg26:
+    case llvm::dwarf::DW_OP_reg27:
+    case llvm::dwarf::DW_OP_reg28:
+    case llvm::dwarf::DW_OP_reg29:
+    case llvm::dwarf::DW_OP_reg30:
+    case llvm::dwarf::DW_OP_reg31:
+    case llvm::dwarf::DW_OP_breg0:
+    case llvm::dwarf::DW_OP_breg1:
+    case llvm::dwarf::DW_OP_breg2:
+    case llvm::dwarf::DW_OP_breg3:
+    case llvm::dwarf::DW_OP_breg4:
+    case llvm::dwarf::DW_OP_breg5:
+    case llvm::dwarf::DW_OP_breg6:
+    case llvm::dwarf::DW_OP_breg7:
+    case llvm::dwarf::DW_OP_breg8:
+    case llvm::dwarf::DW_OP_breg9:
+    case llvm::dwarf::DW_OP_breg10:
+    case llvm::dwarf::DW_OP_breg11:
+    case llvm::dwarf::DW_OP_breg12:
+    case llvm::dwarf::DW_OP_breg13:
+    case llvm::dwarf::DW_OP_breg14:
+    case llvm::dwarf::DW_OP_breg15:
+    case llvm::dwarf::DW_OP_breg16:
+    case llvm::dwarf::DW_OP_breg17:
+    case llvm::dwarf::DW_OP_breg18:
+    case llvm::dwarf::DW_OP_breg19:
+    case llvm::dwarf::DW_OP_breg20:
+    case llvm::dwarf::DW_OP_breg21:
+    case llvm::dwarf::DW_OP_breg22:
+    case llvm::dwarf::DW_OP_breg23:
+    case llvm::dwarf::DW_OP_breg24:
+    case llvm::dwarf::DW_OP_breg25:
+    case llvm::dwarf::DW_OP_breg26:
+    case llvm::dwarf::DW_OP_breg27:
+    case llvm::dwarf::DW_OP_breg28:
+    case llvm::dwarf::DW_OP_breg29:
+    case llvm::dwarf::DW_OP_breg30:
+    case llvm::dwarf::DW_OP_breg31: {
+      bool has_offset = (opcode > llvm::dwarf::DW_OP_reg31);
+      uint8_t reg_num = opcode - (has_offset ? llvm::dwarf::DW_OP_breg0
+                                             : llvm::dwarf::DW_OP_reg0);
+      uint8_t reg_offset = has_offset ? op.getRawOperand(0) : 0;
+
+      auto reg_name_or_err = abi_sp->GetRegisterName(reg_num);
+      if (!reg_name_or_err)
+        return llvm::createStringError(
+            llvm::formatv("Failed to resolve frame base attribute: {0}.",
+                          llvm::fmt_consume(reg_name_or_err.takeError())));
+      std::string reg_name = *reg_name_or_err;
+      reg_name += " + " + std::to_string(reg_offset);
+      return reg_name;
+    } break;
+    default: {
+      return llvm::createStringError(
+          llvm::formatv("Failed to resolve frame base attribute: Unsupported "
+                        "DWARF opcode ({0}).",
+                        opcode));
+    }
+    }
+  };
+
+  std::vector<std::string> frame_bases;
+  VariableMetadata &var_metadata = m_metadatas[expr_idx];
+  DataExtractor fb_expr_data;
+  if (var_metadata.frame_base_expr_list.GetExpressionData(fb_expr_data)) {
+    llvm::DataExtractor data = GetLLVMDataExtractor(fb_expr_data);
+    llvm::DWARFExpression fb_expr(data, fb_expr_data.GetAddressByteSize());
+    for (auto op : fb_expr) {
+      auto fb_or_err = resolve_frame_base(op);
+      if (!fb_or_err) {
+        llvm::consumeError(fb_or_err.takeError());
+        continue;
+      }
+      frame_bases.push_back(std::move(*fb_or_err));
+    }
+  }
+
+  for (auto op : var_metadata.dwarf) {
+    off_t dest_offset = (expr_idx + num_processed_vars++) * sizeof(void *);
     switch (op.getCode()) {
+    case llvm::dwarf::DW_OP_const1u:
+    case llvm::dwarf::DW_OP_const1s:
     case llvm::dwarf::DW_OP_addr: {
       int64_t operand = op.getRawOperand(0);
       expr += "   src_addr = " + std::to_string(operand) +
               ";\n"
               "   dst_addr = (void*) (arg_struct + " +
-              std::to_string(index * 8) +
+              std::to_string(dest_offset) +
               ");\n"
               "   memcpy(dst_addr, &src_addr, count);\n";
       break;
     }
     case llvm::dwarf::DW_OP_fbreg: {
       int64_t operand = op.getRawOperand(0);
-      const char *frame_ptr;
-      abi_sp->GetFramePointerRegister(frame_ptr);
-      expr += "   src_addr = (void*) (regs->" + std::string(frame_ptr) + " + " +
+      expr += "   src_addr = (void*) (regs->" + frame_bases.front() + " + " +
               std::to_string(operand) +
               ");\n"
               "   dst_addr = (void*) (arg_struct + " +
-              std::to_string(index * 8) +
+              std::to_string(dest_offset) +
               ");\n"
               "   memcpy(dst_addr, &src_addr, count);\n";
       break;
@@ -469,7 +603,7 @@ std::string BreakpointInjectedSite::ParseDWARFExpression(size_t index,
     case llvm::dwarf::DW_OP_breg30:
     case llvm::dwarf::DW_OP_breg31: {
       uint8_t reg_num = op.getCode() - llvm::dwarf::DW_OP_breg0;
-      uint64_t offset = op.getRawOperand(0);
+      uint64_t reg_offset = op.getRawOperand(0);
 
       RegisterContext *reg_ctx = m_owner_exe_ctx.GetRegisterContext();
       if (!reg_ctx)
@@ -480,19 +614,22 @@ std::string BreakpointInjectedSite::ParseDWARFExpression(size_t index,
         return "";
 
       expr += "   src_addr = (void*) (regs->" + std::string(reg_name) + " + " +
-              std::to_string(offset) +
+              std::to_string(reg_offset) +
               ");\n"
               "   dst_addr = (void*) (arg_struct + " +
-              std::to_string(index * 8) +
+              std::to_string(dest_offset) +
               ");\n"
               "   memcpy(dst_addr, &src_addr, count);\n";
     } break;
     default: {
       error.Clear();
+      num_processed_vars--;
       break;
     }
     }
   }
+
+  m_args_struct_size += sizeof(void *) * num_processed_vars;
 
   return expr;
 }

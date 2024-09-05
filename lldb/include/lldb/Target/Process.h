@@ -24,7 +24,7 @@
 
 #include "lldb/Breakpoint/BreakpointInjectedSite.h"
 #include "lldb/Breakpoint/BreakpointSite.h"
-#include "lldb/Breakpoint/BreakpointSiteList.h"
+#include "lldb/Breakpoint/StopPointSiteList.h"
 #include "lldb/Breakpoint/WatchpointResource.h"
 #include "lldb/Core/Disassembler.h"
 #include "lldb/Core/LoadedModuleInfoList.h"
@@ -2184,7 +2184,7 @@ public:
   lldb::break_id_t
   FallbackToRegularBreakpointSite(const lldb::BreakpointLocationSP &owner,
                                   bool use_hardware, Log *log,
-                                  const char *error);
+                                  const llvm::Error error);
 
   lldb::WritableDataBufferSP SaveInstructions(Address &address);
 

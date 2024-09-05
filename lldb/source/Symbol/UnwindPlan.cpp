@@ -302,7 +302,7 @@ bool UnwindPlan::Row::SetRegisterLocationToConstantValue(uint32_t reg_num,
       m_register_locations.find(reg_num) != m_register_locations.end())
     return false;
   RegisterLocation reg_loc;
-  reg_loc.SetConstValue(addr);
+  reg_loc.SetIsConstant(addr);
   m_register_locations[reg_num] = reg_loc;
   return true;
 }

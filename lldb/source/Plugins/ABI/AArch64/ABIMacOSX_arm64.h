@@ -18,40 +18,38 @@ public:
   static constexpr const std::size_t aarch64_instr_size = 4;
 
   static constexpr const char *register_context = R"(typedef struct {
-                                                      // intptr_t cpsr;
-                                                      // intptr_t pc;
-                                                      intptr_t sp;
-                                                      intptr_t lr;
-                                                      intptr_t fp;
-                                                      intptr_t x28;
-                                                      intptr_t x27;
-                                                      intptr_t x26;
-                                                      intptr_t x25;
-                                                      intptr_t x24;
-                                                      intptr_t x23;
-                                                      intptr_t x22;
-                                                      intptr_t x21;
-                                                      intptr_t x20;
-                                                      intptr_t x19;
-                                                      intptr_t x18;
-                                                      intptr_t x17;
-                                                      intptr_t x16;
-                                                      intptr_t x15;
-                                                      intptr_t x14;
-                                                      intptr_t x13;
-                                                      intptr_t x12;
-                                                      intptr_t x11;
-                                                      intptr_t x10;
-                                                      intptr_t x9;
-                                                      intptr_t x8;
-                                                      intptr_t x7;
-                                                      intptr_t x6;
-                                                      intptr_t x5;
-                                                      intptr_t x4;
-                                                      intptr_t x3;
-                                                      intptr_t x2;
-                                                      intptr_t x1;
                                                       intptr_t x0;
+                                                      intptr_t x1;
+                                                      intptr_t x2;
+                                                      intptr_t x3;
+                                                      intptr_t x4;
+                                                      intptr_t x5;
+                                                      intptr_t x6;
+                                                      intptr_t x7;
+                                                      intptr_t x8;
+                                                      intptr_t x9;
+                                                      intptr_t x10;
+                                                      intptr_t x11;
+                                                      intptr_t x12;
+                                                      intptr_t x13;
+                                                      intptr_t x14;
+                                                      intptr_t x15;
+                                                      intptr_t x16;
+                                                      intptr_t x17;
+                                                      intptr_t x18;
+                                                      intptr_t x19;
+                                                      intptr_t x20;
+                                                      intptr_t x21;
+                                                      intptr_t x22;
+                                                      intptr_t x23;
+                                                      intptr_t x24;
+                                                      intptr_t x25;
+                                                      intptr_t x26;
+                                                      intptr_t x27;
+                                                      intptr_t x28;
+                                                      intptr_t fp;
+                                                      intptr_t lr;
+                                                      intptr_t sp;
                                                       } register_context;)";
 
   ~ABIMacOSX_arm64() override = default;
@@ -103,6 +101,8 @@ public:
     // Anything else if fair game..
     return true;
   }
+
+  llvm::Expected<std::string> GetRegisterName(uint32_t num) override;
 
   bool GetFramePointerRegister(const char *&name) override;
 
